@@ -58,8 +58,17 @@ struct VaultspaceView: View {
         case .loaded:
             // 3D/FLATは統合キャンバスが1枚で描き、切替時はモーフィングで遷移する
             SpatialCanvasView(store: store)
-                .overlay(alignment: .top) { edgeFade(.top) }
-                .overlay(alignment: .bottom) { edgeFade(.bottom) }
+                .overlay {
+                    // ヘッダー(ステータスバー+ナビバー)と下端の両方を紙色フェードで覆う。
+                    // ignoresSafeAreaをコンテナ全体にかけてバーの裏まで確実に届かせる
+                    VStack(spacing: 0) {
+                        edgeFade(.top)
+                        Spacer()
+                        edgeFade(.bottom)
+                    }
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
+                }
                 .overlay(alignment: .topLeading) { zoomSourceAnchor }
                 .overlay(alignment: .bottomLeading) {
                     cornerLink("MAKE VIDEO", state: .storyboard(ProjectsFeature.State()))
@@ -76,15 +85,13 @@ struct VaultspaceView: View {
         LinearGradient(
             stops: [
                 .init(color: VSTheme.paper, location: 0),
-                .init(color: VSTheme.paper.opacity(0.85), location: 0.4),
+                .init(color: VSTheme.paper.opacity(0.9), location: 0.45),
                 .init(color: VSTheme.paper.opacity(0), location: 1),
             ],
             startPoint: edge == .top ? .top : .bottom,
             endPoint: edge == .top ? .bottom : .top
         )
-        .frame(height: 130)
-        .ignoresSafeArea(edges: edge == .top ? .top : .bottom)
-        .allowsHitTesting(false)
+        .frame(height: 150)
     }
 
     /// タップした写真の矩形に透明なアンカーを重ね、ズームトランジションの発火元にする。
