@@ -9,13 +9,17 @@ struct VideoDetailView: View {
             VStack(alignment: .leading, spacing: 16) {
                 header
 
-                if let techniques = store.video.techniques, !techniques.isEmpty {
-                    techniqueChips(techniques)
-                }
+                actionRow
 
                 if let summary = store.video.summary, !summary.isEmpty {
                     Text(summary)
-                        .font(.body)
+                        .font(.system(size: 13))
+                        .foregroundStyle(VSTheme.charcoal)
+                        .lineSpacing(4)
+                }
+
+                if let techniques = store.video.techniques, !techniques.isEmpty {
+                    techniqueChips(techniques)
                 }
 
                 if !store.clips.isEmpty {
@@ -25,61 +29,94 @@ struct VideoDetailView: View {
                 if !store.stills.isEmpty {
                     stillGrid
                 }
-
-                if let wikiUrl = store.video.wikiUrl, let url = URL(string: wikiUrl) {
-                    Link("Open in Wiki", destination: url)
-                        .font(.callout)
-                }
             }
             .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .background(VSTheme.paper)
+        .presentationBackground(VSTheme.paper)
         .presentationDetents([.medium, .large])
     }
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(store.video.title)
-                .font(.title2.bold())
+            // トップライン: 動画タイプのラベル(Webのkicker相当)
+            if let type = store.video.videoTypeLabel {
+                Text(type.uppercased())
+                    .font(.system(size: 10, weight: .heavy))
+                    .tracking(1.2)
+                    .foregroundStyle(VSTheme.charcoal)
+            }
 
-            HStack(spacing: 8) {
-                if let type = store.video.videoTypeLabel {
-                    badge(type, tint: .accentColor)
+            Text(store.video.title)
+                .font(.instrumentSerif(32))
+                .foregroundStyle(VSTheme.ink)
+                .lineSpacing(0)
+        }
+    }
+
+    // MARK: - アクション行(WIKI / SOURCE)
+
+    /// Webの黒ボタン行。ink面 + paperHi文字のダークボタン。
+    private var actionRow: some View {
+        HStack(spacing: 8) {
+            if let wikiUrl = store.video.wikiUrl, let url = URL(string: wikiUrl) {
+                Link(destination: url) {
+                    darkButtonLabel("WIKI")
                 }
-                if let platform = store.video.platform {
-                    badge(platform, tint: .secondary)
+            }
+            if let sourceUrl = store.video.sourceUrl, let url = URL(string: sourceUrl) {
+                Link(destination: url) {
+                    darkButtonLabel("SOURCE")
                 }
             }
         }
     }
 
-    private func badge(_ text: String, tint: Color) -> some View {
-        Text(text)
-            .font(.caption.weight(.medium))
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .background(tint.opacity(0.15), in: Capsule())
+    private func darkButtonLabel(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 11, weight: .heavy))
+            .tracking(1)
+            .foregroundStyle(VSTheme.paperHi)
+            .padding(.horizontal, 14)
+            .frame(height: 32)
+            .background(VSTheme.ink, in: RoundedRectangle(cornerRadius: 6))
     }
+
+    // MARK: - テクニックチップ
 
     private func techniqueChips(_ techniques: [String]) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
-                ForEach(techniques, id: \.self) { technique in
+                ForEach(techniques.prefix(8), id: \.self) { technique in
                     Text(technique)
-                        .font(.caption)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                        .background(Color.accentColor.opacity(0.12), in: Capsule())
+                        .font(.system(size: 11))
+                        .foregroundStyle(VSTheme.charcoal)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 4)
+                        .overlay {
+                            Capsule().stroke(VSTheme.line, lineWidth: 1)
+                        }
                 }
             }
+            .padding(.vertical, 1) // strokeの見切れ防止
         }
+    }
+
+    // MARK: - セクション見出し
+
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 10, weight: .heavy))
+            .tracking(1.2)
+            .foregroundStyle(VSTheme.silverDark)
     }
 
     // MARK: - クリップレール
 
     private var clipRail: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Clips")
-                .font(.headline)
+            sectionHeader("CLIPS")
 
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: 12) {
@@ -91,40 +128,57 @@ struct VideoDetailView: View {
         }
     }
 
-    @ViewBuilder
     private func clipCell(_ clip: VaultClip) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            if let mediaUrl = clip.mediaUrl,
-               let url = MediaURL.url(mediaPath: mediaUrl) {
-                InlineClipPlayer(
-                    url: url,
-                    posterURL: clip.posterUrl.flatMap { MediaURL.url(mediaPath: $0) }
-                )
-                .frame(width: 220, height: 124)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
-            } else {
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color(.systemFill))
-                    .frame(width: 220, height: 124)
-                    .overlay { Image(systemName: "film").foregroundStyle(.secondary) }
+        VStack(alignment: .leading, spacing: 6) {
+            Group {
+                if let mediaUrl = clip.mediaUrl,
+                   let url = MediaURL.url(mediaPath: mediaUrl) {
+                    InlineClipPlayer(
+                        url: url,
+                        posterURL: clip.posterUrl.flatMap { MediaURL.url(mediaPath: $0) }
+                    )
+                } else {
+                    mediaPlaceholder("CLIP OFFLINE")
+                }
             }
+            .frame(width: 220, height: 124) // 16:9を維持
+            .clipShape(RoundedRectangle(cornerRadius: 5))
 
-            if let caption = clip.caption, !caption.isEmpty {
-                Text(caption)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+            // 強い行(テクニック or タイトル) + キャプション(timecode · platform)
+            if let strong = clip.technique ?? clip.title, !strong.isEmpty {
+                Text(strong)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(VSTheme.ink)
                     .lineLimit(2)
-                    .frame(width: 220, alignment: .leading)
+            }
+            if let caption = clipCaption(clip) {
+                Text(caption)
+                    .font(.system(size: 11))
+                    .foregroundStyle(VSTheme.silverDark)
+                    .lineLimit(1)
             }
         }
+        .frame(width: 220, alignment: .leading)
+        .padding(7)
+        .background(VSTheme.paperHi)
+        .clipShape(RoundedRectangle(cornerRadius: 7))
+        .overlay {
+            RoundedRectangle(cornerRadius: 7)
+                .stroke(VSTheme.line, lineWidth: 1)
+        }
+    }
+
+    /// "timecode · platform" 形式のキャプション。どちらもなければnil。
+    private func clipCaption(_ clip: VaultClip) -> String? {
+        let parts = [clip.timecode, clip.platform].compactMap(\.self).filter { !$0.isEmpty }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     // MARK: - スチルグリッド
 
     private var stillGrid: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Stills")
-                .font(.headline)
+            sectionHeader("STILLS")
 
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
                 ForEach(store.stills) { still in
@@ -135,22 +189,23 @@ struct VideoDetailView: View {
     }
 
     private func stillCell(_ still: VaultStill) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 6) {
             Group {
                 if let mediaUrl = still.mediaUrl,
                    let url = MediaURL.url(mediaPath: mediaUrl) {
                     AsyncImage(url: url) { image in
                         image.resizable().aspectRatio(contentMode: .fill)
                     } placeholder: {
-                        Color(.systemFill)
+                        VSTheme.paperLow
                     }
                 } else {
-                    Color(.systemFill)
+                    mediaPlaceholder("STILL OFFLINE")
                 }
             }
             .frame(height: 96)
             .frame(maxWidth: .infinity)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .background(VSTheme.paperLow)
+            .clipShape(RoundedRectangle(cornerRadius: 5))
 
             if let facets = still.facets {
                 facetLabels(facets)
@@ -160,13 +215,30 @@ struct VideoDetailView: View {
                 paletteSwatches(palette)
             }
         }
+        .padding(7)
+        .background(VSTheme.paperHi)
+        .clipShape(RoundedRectangle(cornerRadius: 7))
+        .overlay {
+            RoundedRectangle(cornerRadius: 7)
+                .stroke(VSTheme.line, lineWidth: 1)
+        }
+    }
+
+    /// オフライン時のプレースホルダー面(paperLow + 中央ラベル)。
+    private func mediaPlaceholder(_ label: String) -> some View {
+        VSTheme.paperLow
+            .overlay {
+                Text(label)
+                    .font(.system(size: 10, weight: .heavy))
+                    .foregroundStyle(VSTheme.ink.opacity(0.52))
+            }
     }
 
     private func facetLabels(_ facets: VaultFacets) -> some View {
         let labels = [facets.shotSize, facets.angle, facets.subject].compactMap(\.self)
-        return Text(labels.joined(separator: " · "))
-            .font(.caption2)
-            .foregroundStyle(.secondary)
+        return Text(labels.joined(separator: " · ").uppercased())
+            .font(.system(size: 10, weight: .heavy))
+            .foregroundStyle(VSTheme.silverDark)
             .lineLimit(1)
     }
 
@@ -177,6 +249,10 @@ struct VideoDetailView: View {
                     RoundedRectangle(cornerRadius: 3)
                         .fill(color)
                         .frame(width: 18, height: 18)
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 3)
+                                .stroke(VSTheme.line, lineWidth: 1)
+                        }
                 }
             }
         }

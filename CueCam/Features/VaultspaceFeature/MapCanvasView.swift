@@ -8,16 +8,28 @@ struct VaultspaceView: View {
         NavigationStack {
             content
                 .navigationTitle("Vaultspace")
+                .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
+                    // Webのセリフ体モードトグルを模したタイトル(操作は不要なので表示のみ)
+                    ToolbarItem(placement: .principal) {
+                        Text("VAULT · FLAT")
+                            .font(.instrumentSerif(22))
+                            .foregroundStyle(VSTheme.ink)
+                    }
                     ToolbarItem(placement: .topBarTrailing) {
                         Button {
                             store.send(.refresh)
                         } label: {
                             Image(systemName: "arrow.clockwise")
+                                .foregroundStyle(VSTheme.ink)
                         }
                     }
                 }
+                .toolbarBackground(VSTheme.paper, for: .navigationBar)
+                .toolbarBackground(.visible, for: .navigationBar)
         }
+        // Vaultspaceタブは常に紙のライトテーマで描く(Webと同一の世界観)
+        .preferredColorScheme(.light)
         .sheet(item: $store.scope(state: \.detail, action: \.detail)) { detailStore in
             VideoDetailView(store: detailStore)
         }
@@ -29,9 +41,15 @@ struct VaultspaceView: View {
         switch store.loadState {
         case .idle, .loading:
             ProgressView("Loading manifest…")
+                .tint(VSTheme.charcoal)
+                .foregroundStyle(VSTheme.charcoal)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(VSTheme.paper)
         case .failed(let message):
             ErrorRetryView(message: message) { store.send(.refresh) }
+                .foregroundStyle(VSTheme.charcoal)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(VSTheme.paper)
         case .loaded:
             MapCanvasView(store: store)
         }
@@ -47,7 +65,10 @@ struct MapCanvasView: View {
 
     private static let canvasSize: CGFloat = 3000
     private static let padding: CGFloat = 200
-    private static let thumbSize = CGSize(width: 120, height: 68)
+    /// Webの drawTile 相当: カード全体 120×100(上部にメディア、下部に~15ptのタイトル帯)
+    private static let tileSize = CGSize(width: 120, height: 100)
+    private static let titleStripHeight: CGFloat = 15
+    private static let mediaInset: CGFloat = 6
     private static let zoomRange: ClosedRange<CGFloat> = 0.4...3.0
 
     var body: some View {
@@ -67,8 +88,32 @@ struct MapCanvasView: View {
             .frame(width: side, height: side)
         }
         .defaultScrollAnchor(.center)
-        .background(Color(.systemGroupedBackground))
+        .background(VSTheme.paper)
+        // Web版の巨大ウォーターマーク。可視領域に固定で敷く(キャンバスと一緒にスクロールしない)
+        .background(alignment: .topLeading) {
+            watermark
+        }
         .gesture(magnifyGesture)
+    }
+
+    /// 背景の "VAULT" / "FLAT" ウォーターマーク。
+    private var watermark: some View {
+        ZStack(alignment: .topLeading) {
+            VSTheme.paper
+            Text("VAULT")
+                .font(.instrumentSerif(110))
+                .foregroundStyle(VSTheme.watermark)
+                .fixedSize()
+                .padding(.leading, 12)
+            Text("FLAT")
+                .font(.instrumentSerif(80))
+                .foregroundStyle(VSTheme.watermark)
+                .fixedSize()
+                .padding([.trailing, .bottom], 16)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+        }
+        .ignoresSafeArea()
+        .allowsHitTesting(false)
     }
 
     private var effectiveZoom: CGFloat {
@@ -88,33 +133,66 @@ struct MapCanvasView: View {
             }
     }
 
+    /// Webの drawTile を再現したカード: paperHiの面 + lineFaintの枠 + 淡い影、
+    /// メディアを6pt内側に敷き、カード内下部にタイトル帯を持つ。
     private func thumbnail(for video: VaultVideo) -> some View {
-        VStack(spacing: 4) {
-            Group {
-                if let posterUrl = video.posterUrl,
-                   let url = MediaURL.url(mediaPath: posterUrl) {
-                    AsyncImage(url: url) { image in
-                        image.resizable().aspectRatio(contentMode: .fill)
-                    } placeholder: {
-                        Color(.systemFill)
-                    }
-                } else {
-                    Color(.systemFill)
-                        .overlay { Image(systemName: "film").foregroundStyle(.secondary) }
-                }
-            }
-            .frame(width: Self.thumbSize.width, height: Self.thumbSize.height)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .shadow(radius: 2)
+        VStack(spacing: 0) {
+            tileMedia(for: video)
+                .frame(
+                    width: Self.tileSize.width - Self.mediaInset * 2,
+                    height: Self.tileSize.height - Self.titleStripHeight - Self.mediaInset * 2
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 1))
+                .padding(Self.mediaInset)
 
+            // タイトル帯(カード内部・下端)
             Text(video.title)
-                .font(.caption2)
+                .font(.system(size: 9))
+                .foregroundStyle(VSTheme.ink)
                 .lineLimit(1)
-                .frame(width: Self.thumbSize.width)
+                .frame(
+                    width: Self.tileSize.width - Self.mediaInset * 2,
+                    height: Self.titleStripHeight,
+                    alignment: .leading
+                )
+                .padding(.bottom, Self.mediaInset - 2)
         }
+        .frame(width: Self.tileSize.width, height: Self.tileSize.height)
+        .background(VSTheme.paperHi)
+        .clipShape(RoundedRectangle(cornerRadius: 2))
+        .overlay {
+            RoundedRectangle(cornerRadius: 2)
+                .stroke(VSTheme.lineFaint, lineWidth: 1)
+        }
+        .shadow(color: VSTheme.ink.opacity(0.09), radius: 5, x: 0, y: 3)
         // タップ = Wikiノートへ / 長押し = クリップ・スチルの詳細シート
         .onTapGesture { store.send(.videoTapped(video.id)) }
         .onLongPressGesture { store.send(.videoDetailRequested(video.id)) }
+    }
+
+    @ViewBuilder
+    private func tileMedia(for video: VaultVideo) -> some View {
+        if let posterUrl = video.posterUrl,
+           let url = MediaURL.url(mediaPath: posterUrl) {
+            AsyncImage(url: url) { image in
+                image.resizable().aspectRatio(contentMode: .fill)
+            } placeholder: {
+                VSTheme.paperLow
+            }
+        } else {
+            // ポスターなし: paperLowに斜線1本 + タイプ名(Webのプレースホルダー)
+            VSTheme.paperLow
+                .overlay {
+                    DiagonalLine()
+                        .stroke(VSTheme.line, lineWidth: 1)
+                }
+                .overlay {
+                    Text(video.videoTypeLabel ?? "VIDEO")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(VSTheme.ink)
+                        .lineLimit(1)
+                }
+        }
     }
 
     /// space.positions(なければvideo.map)のmin/maxを取り、パディング込みの
@@ -144,6 +222,16 @@ struct MapCanvasView: View {
             )
         }
         return result
+    }
+}
+
+/// プレースホルダー用の対角線(左上→右下)。
+private struct DiagonalLine: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        return path
     }
 }
 

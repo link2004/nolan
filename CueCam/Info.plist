@@ -27,6 +27,11 @@
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Local network access is used to load vault data from the local servers on your Mac.</string>
+	<key>UIAppFonts</key>
+	<array>
+		<string>InstrumentSerif-Regular.ttf</string>
+		<string>InstrumentSerif-Italic.ttf</string>
+	</array>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UISupportedInterfaceOrientations</key>

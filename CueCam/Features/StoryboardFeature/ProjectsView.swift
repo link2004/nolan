@@ -8,9 +8,12 @@ struct ProjectsView: View {
         NavigationStack(path: $store.scope(state: \.path, action: \.path)) {
             rootList
                 .navigationTitle("Storyboard")
+                .toolbarBackground(SBTheme.bg, for: .navigationBar)
+                .toolbarColorScheme(.dark, for: .navigationBar)
         } destination: { store in
             BoardView(store: store)
         }
+        .preferredColorScheme(.dark)
         .task { store.send(.task) }
     }
 
@@ -19,52 +22,79 @@ struct ProjectsView: View {
         switch store.loadState {
         case .idle, .loading:
             ProgressView("Loading projects…")
+                .tint(SBTheme.fg2)
+                .foregroundStyle(SBTheme.fg2)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(SBTheme.bg)
         case .failed(let message):
             ErrorRetryView(message: message) { store.send(.refresh) }
+                .foregroundStyle(SBTheme.fg2)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(SBTheme.bg)
         case .loaded:
             List(store.projects) { project in
-                if project.hasStoryboard == false {
-                    // ストーリーボード未作成のプロジェクトは遷移不可
-                    ProjectRow(project: project)
-                        .opacity(0.4)
-                } else {
-                    NavigationLink(state: BoardFeature.State(note: project.note, title: project.title)) {
+                Group {
+                    if project.hasStoryboard == false {
+                        // ストーリーボード未作成のプロジェクトは遷移不可
                         ProjectRow(project: project)
+                            .opacity(0.4)
+                    } else {
+                        NavigationLink(state: BoardFeature.State(note: project.note, title: project.title)) {
+                            ProjectRow(project: project)
+                        }
                     }
                 }
+                .listRowSeparator(.hidden)
+                .listRowBackground(rowBackground)
             }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .background(SBTheme.bg)
             .refreshable { await store.send(.refresh).finish() }
         }
     }
+
+    /// 各行をカード面(surface + ヘアライン枠)として浮かせる背景。
+    private var rowBackground: some View {
+        RoundedRectangle(cornerRadius: 6)
+            .fill(SBTheme.surface)
+            .overlay {
+                RoundedRectangle(cornerRadius: 6)
+                    .strokeBorder(SBTheme.hairline, lineWidth: 1)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 4)
+    }
 }
 
-/// プロジェクト一覧の1行。サムネイル + タイトル + client/statusバッジ + カバレッジバー。
+/// プロジェクト一覧の1行。サムネイル + タイトル + client/statusピル + カバレッジバー。
 struct ProjectRow: View {
     let project: SBProject
 
     var body: some View {
         HStack(spacing: 12) {
             thumbnail
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text(project.title)
-                    .font(.body)
+                    .font(.instrumentSerif(19))
+                    .foregroundStyle(SBTheme.fg1)
                     .lineLimit(2)
                 HStack(spacing: 6) {
                     if let client = project.client, !client.isEmpty {
-                        BadgeText(client, tint: .blue)
+                        // clientはニュートラルなヘアライン枠ピル
+                        StatusPill(text: client, background: .clear, foreground: SBTheme.fg2, bordered: true)
                     }
                     if let status = project.status, !status.isEmpty {
-                        BadgeText(status, tint: .orange)
+                        let tint = StatusPill.tint(for: status)
+                        StatusPill(text: status, background: tint.background, foreground: tint.foreground)
                     }
                 }
                 if let coverage = project.coverage {
-                    ProgressView(value: min(max(coverage, 0), 1))
-                        .tint(coverage >= 1 ? .green : .accentColor)
+                    CoverageBar(ratio: coverage)
                 }
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 6)
     }
 
     @ViewBuilder
@@ -74,33 +104,71 @@ struct ProjectRow: View {
             image.resizable().scaledToFill()
         } placeholder: {
             Rectangle()
-                .fill(.quaternary)
+                .fill(SBTheme.bgRaised)
                 .overlay {
                     Image(systemName: "film")
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(SBTheme.fg3)
                 }
         }
         .frame(width: 64, height: 64)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .clipShape(RoundedRectangle(cornerRadius: 4))
+        .overlay {
+            RoundedRectangle(cornerRadius: 4)
+                .strokeBorder(SBTheme.hairline, lineWidth: 1)
+        }
     }
 }
 
-/// client/status用の小さなバッジ。
-struct BadgeText: View {
+/// client/status用のステータスピル。statusは状態に応じてgreen/crimson/amberに色分けする。
+struct StatusPill: View {
     let text: String
-    let tint: Color
-
-    init(_ text: String, tint: Color) {
-        self.text = text
-        self.tint = tint
-    }
+    let background: Color
+    let foreground: Color
+    var bordered: Bool = false
 
     var body: some View {
         Text(text)
-            .font(.caption2)
-            .padding(.horizontal, 7)
-            .padding(.vertical, 2)
-            .background(tint.opacity(0.15), in: Capsule())
-            .foregroundStyle(tint)
+            .font(.system(size: 10.5, weight: .medium))
+            .tracking(1.4)
+            .textCase(.uppercase)
+            .foregroundStyle(foreground)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 3)
+            .background(background, in: Capsule())
+            .overlay {
+                if bordered {
+                    Capsule().strokeBorder(SBTheme.hairline, lineWidth: 1)
+                }
+            }
+    }
+
+    /// statusの状態 → ピルの配色。refined=green / generating・failed=crimson / それ以外=amber。
+    static func tint(for status: String) -> (background: Color, foreground: Color) {
+        switch status.lowercased() {
+        case "refined":
+            return (SBTheme.greenBg, SBTheme.greenText)
+        case "generating", "failed":
+            return (SBTheme.crimson.opacity(0.18), Color.rgb(0xe4bcbc))
+        default:
+            return (SBTheme.amberBg, SBTheme.amberText)
+        }
+    }
+}
+
+/// カバレッジバー(ダークなトラック + markのfill)。
+struct CoverageBar: View {
+    let ratio: Double
+
+    var body: some View {
+        Capsule()
+            .fill(SBTheme.track)
+            .frame(height: 4)
+            .overlay(alignment: .leading) {
+                GeometryReader { proxy in
+                    Capsule()
+                        .fill(SBTheme.mark)
+                        .frame(width: proxy.size.width * min(max(ratio, 0), 1))
+                }
+            }
     }
 }
