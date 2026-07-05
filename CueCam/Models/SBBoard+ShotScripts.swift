@@ -23,7 +23,16 @@ extension SBBoard {
                     slate: "\(beat.id) · \(String(format: "%02d", index + 1))",
                     text: text,
                     direction: (direction?.isEmpty == false && direction != text) ? direction : nil,
-                    techniques: line.technique ?? []
+                    techniques: line.technique ?? [],
+                    reference: line.reference.flatMap { reference in
+                        MediaURL.url(key: reference.path).map { url in
+                            ShotReference(
+                                isClip: reference.isClip,
+                                url: url,
+                                posterURL: reference.poster.flatMap { MediaURL.url(key: $0) }
+                            )
+                        }
+                    }
                 )
             }
         }

@@ -1,5 +1,13 @@
 import Foundation
 
+/// ラインに紐づく参照メディア(お手本)。
+/// ShootCam ターゲットにも入るため SBReference/MediaURL には依存しない解決済みの形
+struct ShotReference: Equatable, Sendable {
+    let isClip: Bool
+    let url: URL
+    let posterURL: URL?
+}
+
 /// 1カット分の撮影指示スクリプト
 struct ShotScript: Equatable, Identifiable, Sendable {
     let id: String
@@ -10,29 +18,33 @@ struct ShotScript: Equatable, Identifiable, Sendable {
     /// 補足のショット指示(text が script のときの shot_direction)
     let direction: String?
     let techniques: [String]
+    let reference: ShotReference?
 
     init(
         id: String,
         slate: String? = nil,
         text: String,
         direction: String? = nil,
-        techniques: [String] = []
+        techniques: [String] = [],
+        reference: ShotReference? = nil
     ) {
         self.id = id
         self.slate = slate
         self.text = text
         self.direction = direction
         self.techniques = techniques
+        self.reference = reference
     }
 }
 
 extension [ShotScript] {
-    // TODO: ShootCam 単体起動用の固定モック(本体は SBBoard.shotScripts を使う)
+    // TODO: ShootCam 単体起動用の固定モック(本体は SBBoard.shotScripts を使う)。
+    // モーションコーチの各パターンを確認できるよう動きの語を散らしてある
     static let mock: Self = [
-        ShotScript(id: "mock-1", text: "Film the storefront from the front, panning slowly for about 3 seconds"),
-        ShotScript(id: "mock-2", text: "Film yourself opening the door and walking inside"),
-        ShotScript(id: "mock-3", text: "Slowly pan from left to right to capture the atmosphere of the interior"),
-        ShotScript(id: "mock-4", text: "Film a close-up of the drink you ordered"),
-        ShotScript(id: "mock-5", text: "From a window seat, frame both the view outside and the interior"),
+        ShotScript(id: "mock-1", text: "Film the storefront, panning slowly from left to right"),
+        ShotScript(id: "mock-2", text: "Whip pan from the street sign to the entrance door"),
+        ShotScript(id: "mock-3", text: "Tight overhead shot of your drink on the table"),
+        ShotScript(id: "mock-4", text: "Slow push in on the counter as the barista works", direction: "Dolly in smoothly, keep the cup centered"),
+        ShotScript(id: "mock-5", text: "Handheld shot follows you to the window seat"),
     ]
 }

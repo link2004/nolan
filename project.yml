@@ -1,6 +1,6 @@
 name: CueCam
 options:
-  bundleIdPrefix: com.cuecam
+  bundleIdPrefix: com.nolan
   deploymentTarget:
     iOS: "18.0"
 packages:
@@ -21,7 +21,7 @@ targets:
       - package: ComposableArchitecture
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.cuecam.app
+        PRODUCT_BUNDLE_IDENTIFIER: com.nolan.ios
         TARGETED_DEVICE_FAMILY: "1"
     info:
       path: CueCam/Info.plist
@@ -32,6 +32,7 @@ targets:
         NSLocalNetworkUsageDescription: Local network access is used to load vault data from the local servers on your Mac.
         NSCameraUsageDescription: CueCam uses the camera to record video for each scripted shot on the storyboard.
         NSMicrophoneUsageDescription: CueCam uses the microphone to record audio while filming.
+        NSPhotoLibraryAddUsageDescription: CueCam saves your approved takes to the camera roll.
         UIAppFonts:
           - InstrumentSerif-Regular.ttf
           - InstrumentSerif-Italic.ttf
@@ -50,14 +51,17 @@ targets:
       - path: ShootCam
       - path: CueCam/Features/ShootFeature
       - path: CueCam/Clients/CameraClient.swift
+      - path: CueCam/Clients/PhotoLibraryClient.swift
       - path: CueCam/Models/ShotScript.swift
       # Design はディレクトリごと参照しない(並行開発中の他機能のファイルを巻き込まないため)
       - path: CueCam/Design/AppColor.swift
+      - path: CueCam/Design/Theme.swift
+      - path: CueCam/Design/Fonts
     dependencies:
       - package: ComposableArchitecture
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.cuecam.shootcam
+        PRODUCT_BUNDLE_IDENTIFIER: com.nolan.shootcam
         TARGETED_DEVICE_FAMILY: "1"
     info:
       path: ShootCam/Info.plist
@@ -65,6 +69,10 @@ targets:
         CFBundleDisplayName: ShootCam
         NSCameraUsageDescription: ShootCam uses the camera to record video for each scripted shot
         NSMicrophoneUsageDescription: ShootCam uses the microphone to record audio while filming
+        NSPhotoLibraryAddUsageDescription: ShootCam saves your approved takes to the camera roll.
+        UIAppFonts:
+          - InstrumentSerif-Regular.ttf
+          - InstrumentSerif-Italic.ttf
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationLandscapeRight

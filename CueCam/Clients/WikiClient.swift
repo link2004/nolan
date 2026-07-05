@@ -180,6 +180,8 @@ struct WikiClient {
     var backlinks: @Sendable (_ slug: String) async -> [WikiNoteRef] = { _ in [] }
     var notesForTag: @Sendable (_ tag: String) async -> [WikiNoteRef] = { _ in [] }
     var search: @Sendable (_ query: String) async -> [WikiSearchHit] = { _ in [] }
+    /// ノートHTMLを取得して埋め込み動画カットを抽出する(contentIndexには残らないため)。
+    var clips: @Sendable (_ base: URL, _ slug: String) async -> [WikiClip] = { _, _ in [] }
 }
 
 extension WikiClient: DependencyKey {
@@ -190,7 +192,8 @@ extension WikiClient: DependencyKey {
         resolveLink: { await WikiIndexStore.shared.resolve(link: $0) },
         backlinks: { await WikiIndexStore.shared.backlinks(slug: $0) },
         notesForTag: { await WikiIndexStore.shared.notes(tag: $0) },
-        search: { await WikiIndexStore.shared.search($0) }
+        search: { await WikiIndexStore.shared.search($0) },
+        clips: { await WikiClipHTML.fetch(base: $0, slug: $1) }
     )
 }
 

@@ -6,6 +6,7 @@ import Foundation
 @Reducer
 struct ShootFeature {
     @Dependency(\.cameraClient) var cameraClient
+    @Dependency(\.photoLibrary) var photoLibrary
 
     @ObservableState
     struct State: Equatable {
@@ -17,8 +18,10 @@ struct ShootFeature {
         var currentIndex = 0
         var phase: Phase = .preparing
         var session: CameraSession?
-        /// OK済みテイク(script.id → 動画URL)。書き出し機能で使う予定
+        /// OK済みテイク(script.id → 動画URL)。承認時にフォトライブラリにも保存される
         var approvedTakes: [String: URL] = [:]
+        /// フォトライブラリ保存の失敗メッセージ(次の操作でクリア)
+        var saveError: String?
 
         var currentScript: ShotScript? {
             scripts.indices.contains(currentIndex) ? scripts[currentIndex] : nil
@@ -42,6 +45,7 @@ struct ShootFeature {
         case recordingFinished(Result<URL, any Error>)
         case retakeTapped
         case okTapped
+        case librarySaveFailed(String)
         case restartTapped
         case closeButtonTapped
         case delegate(Delegate)
@@ -78,6 +82,7 @@ struct ShootFeature {
                 switch state.phase {
                 case .ready:
                     state.phase = .recording
+                    state.saveError = nil
                     return .run { _ in await cameraClient.startRecording() }
                 case .recording:
                     return .run { send in
@@ -111,12 +116,24 @@ struct ShootFeature {
                     let script = state.currentScript
                 else { return .none }
                 state.approvedTakes[script.id] = url
+                state.saveError = nil
                 if state.currentIndex + 1 < state.scripts.count {
                     state.currentIndex += 1
                     state.phase = .ready
                 } else {
                     state.phase = .finished
                 }
+                // カメラロールへの保存はUIをブロックせず裏で行い、失敗だけ通知する
+                return .run { send in
+                    do {
+                        try await photoLibrary.saveVideo(url)
+                    } catch {
+                        await send(.librarySaveFailed(error.localizedDescription))
+                    }
+                }
+
+            case .librarySaveFailed(let message):
+                state.saveError = message
                 return .none
 
             case .restartTapped:

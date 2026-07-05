@@ -61,6 +61,7 @@ xcodebuild -project CueCam.xcodeproj -scheme CueCam \
 ボード画面のツールバー「Shoot」から、そのボードの beats/lines を撮影スクリプトにした横持ち撮影フローに入れる(ADR-003/004参照)。
 
 - フロー: Storyboard タブ → プロジェクト → ボード → Shoot → 横向きに切替 → スクリプトを1カットずつ 録画→プレビュー→OK/Retake → 完了 → Done で縦に復帰
+- 撮影画面の補助(ADR-005): ラインの参照メディアを右上に4:5・幅100ptでミュートループ再生(`ShotReference`) / shot_direction からキーワード検出した11種のカメラモーションを矢印の描画アニメで表示(`MotionCoach`) / OK, Next で `PhotoLibraryClient` がテイクをカメラロールへ保存(失敗はバナー通知)
 - スクリプト生成: `SBBoard.shotScripts`(`Models/SBBoard+ShotScripts.swift`)が全ラインを平坦化。AI生成ではなくボードの `script`/`shot_direction` 直接マッピング
 - コード: `Features/ShootFeature/`(状態機械+横持ちUI+OrientationLock)、`Clients/CameraClient.swift`、`Models/ShotScript.swift`
 - 横向き制御: Info.plist は縦+横を宣言し、`OrientationLockDelegate`(既定 .portrait)を ShootView 表示中のみ .landscape に切替

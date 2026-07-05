@@ -24,6 +24,13 @@
 	<string>ShootCam uses the camera to record video for each scripted shot</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>ShootCam uses the microphone to record audio while filming</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>ShootCam saves your approved takes to the camera roll.</string>
+	<key>UIAppFonts</key>
+	<array>
+		<string>InstrumentSerif-Regular.ttf</string>
+		<string>InstrumentSerif-Italic.ttf</string>
+	</array>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UISupportedInterfaceOrientations</key>
