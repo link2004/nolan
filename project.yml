@@ -33,3 +33,31 @@ targets:
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
+  # ShootFeature(スクリプト付き撮影フロー)を単体で実機起動するための開発用シェル。
+  # CueCam本体のルート再構築後にタブとして統合し、このターゲットは削除予定 (ADR-002)
+  ShootCam:
+    type: application
+    platform: iOS
+    sources:
+      - path: ShootCam
+      - path: CueCam/Features/ShootFeature
+      - path: CueCam/Clients/CameraClient.swift
+      - path: CueCam/Models/ShotScript.swift
+      # Design はディレクトリごと参照しない(並行開発中の他機能のファイルを巻き込まないため)
+      - path: CueCam/Design/AppColor.swift
+    dependencies:
+      - package: ComposableArchitecture
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.cuecam.shootcam
+        TARGETED_DEVICE_FAMILY: "1"
+    info:
+      path: ShootCam/Info.plist
+      properties:
+        CFBundleDisplayName: ShootCam
+        NSCameraUsageDescription: スクリプトに従って動画を撮影するためにカメラを使用します
+        NSMicrophoneUsageDescription: 動画撮影時に音声を録音するためにマイクを使用します
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationLandscapeRight
+          - UIInterfaceOrientationLandscapeLeft

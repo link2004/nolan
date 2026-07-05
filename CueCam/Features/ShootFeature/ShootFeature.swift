@@ -1,80 +1,124 @@
 import ComposableArchitecture
 import Foundation
 
+/// スクリプト付き撮影フロー:
+/// preparing → ready → recording → reviewing → (OKで次のスクリプト or finished)
 @Reducer
 struct ShootFeature {
-    @Dependency(\.directorClient) var directorClient
+    @Dependency(\.cameraClient) var cameraClient
 
     @ObservableState
     struct State: Equatable {
-        let theme: String
-        var shotPlan: [ShotInstruction] = []
-        var currentShotIndex = 0
-        var isLoadingPlan = false
-        var isRecording = false
-        var loadError: String?
+        var scripts: [ShotScript]
+        var currentIndex = 0
+        var phase: Phase = .preparing
+        var session: CameraSession?
+        /// OK済みテイク(script.id → 動画URL)。書き出し機能で使う予定
+        var approvedTakes: [Int: URL] = [:]
 
-        var currentShot: ShotInstruction? {
-            shotPlan.indices.contains(currentShotIndex) ? shotPlan[currentShotIndex] : nil
+        var currentScript: ShotScript? {
+            scripts.indices.contains(currentIndex) ? scripts[currentIndex] : nil
         }
 
-        var isLastShot: Bool {
-            currentShotIndex >= shotPlan.count - 1
+        enum Phase: Equatable {
+            case preparing
+            case denied
+            case ready
+            case recording
+            case reviewing(URL)
+            case finished
         }
     }
 
     enum Action {
         case onAppear
-        case shotPlanLoaded(Result<[ShotInstruction], Error>)
+        case authorizationResponse(Bool)
+        case sessionStarted(CameraSession?)
         case recordButtonTapped
-        case nextShotButtonTapped
-        case closeButtonTapped
-        case delegate(Delegate)
-
-        enum Delegate: Equatable {
-            case finished
-        }
+        case recordingFinished(Result<URL, any Error>)
+        case retakeTapped
+        case okTapped
+        case restartTapped
     }
 
     var body: some ReducerOf<Self> {
         Reduce { state, action in
             switch action {
             case .onAppear:
-                guard state.shotPlan.isEmpty, !state.isLoadingPlan else { return .none }
-                state.isLoadingPlan = true
-                return .run { [theme = state.theme] send in
-                    let result = await Result { try await directorClient.makeShotPlan(theme) }
-                    await send(.shotPlanLoaded(result))
+                guard state.phase == .preparing else { return .none }
+                return .run { send in
+                    await send(.authorizationResponse(cameraClient.requestAuthorization()))
                 }
 
-            case .shotPlanLoaded(.success(let plan)):
-                state.isLoadingPlan = false
-                state.shotPlan = plan
+            case .authorizationResponse(false):
+                state.phase = .denied
                 return .none
 
-            case .shotPlanLoaded(.failure(let error)):
-                state.isLoadingPlan = false
-                state.loadError = error.localizedDescription
+            case .authorizationResponse(true):
+                return .run { send in
+                    await send(.sessionStarted(cameraClient.startSession()))
+                }
+
+            case .sessionStarted(let session):
+                state.session = session
+                state.phase = .ready
                 return .none
 
             case .recordButtonTapped:
-                // TODO: CameraClient経由で実際の録画開始/停止を行う
-                state.isRecording.toggle()
-                return .none
-
-            case .nextShotButtonTapped:
-                if state.isLastShot {
-                    return .send(.delegate(.finished))
+                switch state.phase {
+                case .ready:
+                    state.phase = .recording
+                    return .run { _ in await cameraClient.startRecording() }
+                case .recording:
+                    return .run { send in
+                        do {
+                            let url = try await cameraClient.stopRecording()
+                            await send(.recordingFinished(.success(url)))
+                        } catch {
+                            await send(.recordingFinished(.failure(error)))
+                        }
+                    }
+                default:
+                    return .none
                 }
-                state.currentShotIndex += 1
-                state.isRecording = false
+
+            case .recordingFinished(.success(let url)):
+                state.phase = .reviewing(url)
                 return .none
 
-            case .closeButtonTapped:
-                return .send(.delegate(.finished))
-
-            case .delegate:
+            case .recordingFinished(.failure):
+                state.phase = .ready
                 return .none
+
+            case .retakeTapped:
+                guard case .reviewing(let url) = state.phase else { return .none }
+                state.phase = .ready
+                return .run { _ in try? FileManager.default.removeItem(at: url) }
+
+            case .okTapped:
+                guard
+                    case .reviewing(let url) = state.phase,
+                    let script = state.currentScript
+                else { return .none }
+                state.approvedTakes[script.id] = url
+                if state.currentIndex + 1 < state.scripts.count {
+                    state.currentIndex += 1
+                    state.phase = .ready
+                } else {
+                    state.phase = .finished
+                }
+                return .none
+
+            case .restartTapped:
+                let takes = Array(state.approvedTakes.values)
+                state.approvedTakes = [:]
+                state.currentIndex = 0
+                state.phase = .ready
+                return .run { _ in
+                    for url in takes {
+                        try? FileManager.default.removeItem(at: url)
+                    }
+                }
             }
         }
     }
