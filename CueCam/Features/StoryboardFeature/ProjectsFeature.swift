@@ -8,14 +8,12 @@ struct ProjectsFeature {
         var projects: [SBProject] = []
         var loadState: LoadState = .idle
         var base: URL?
-        var path = StackState<BoardFeature.State>()
     }
 
     enum Action {
         case task
         case refresh
         case loaded(Result<[SBProject], any Error>)
-        case path(StackActionOf<BoardFeature>)
     }
 
     @Dependency(\.storyboardClient) var storyboardClient
@@ -39,13 +37,7 @@ struct ProjectsFeature {
             case .loaded(.failure(let error)):
                 state.loadState = .failed(error.localizedDescription)
                 return .none
-
-            case .path:
-                return .none
             }
-        }
-        .forEach(\.path, action: \.path) {
-            BoardFeature()
         }
     }
 

@@ -44,22 +44,12 @@ struct WikiView: View {
     private var palette: WikiPalette { .current(colorScheme) }
 
     var body: some View {
-        NavigationStack(path: $store.scope(state: \.path, action: \.path)) {
-            rootList
-                .navigationTitle("Wiki")
-                .searchable(text: $store.searchQuery, prompt: "Search notes")
-                .toolbarBackground(palette.light, for: .navigationBar)
-        } destination: { store in
-            switch store.case {
-            case .folder(let store):
-                WikiFolderView(store: store)
-            case .note(let store):
-                WikiNoteView(store: store)
-            case .tag(let store):
-                WikiTagView(store: store)
-            }
-        }
-        .task { store.send(.task) }
+        // タブ廃止に伴い、Wikiルートはホームのスタックに積まれる1画面になった
+        rootList
+            .navigationTitle("Wiki")
+            .searchable(text: $store.searchQuery, prompt: "Search notes")
+            .toolbarBackground(palette.light, for: .navigationBar)
+            .task { store.send(.task) }
     }
 
     @ViewBuilder
@@ -106,7 +96,7 @@ struct WikiView: View {
                     .listRowBackground(Color.clear)
             }
             ForEach(store.searchResults) { hit in
-                NavigationLink(state: WikiFeature.Path.State.note(.init(ref: hit.ref))) {
+                NavigationLink(state: AppReducer.Path.State.note(.init(ref: hit.ref))) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(hit.ref.title)
                             .font(.system(size: 16))
@@ -143,7 +133,7 @@ struct FolderRows: View {
 
     var body: some View {
         ForEach(folder.subfolders) { sub in
-            NavigationLink(state: WikiFeature.Path.State.folder(.init(folder: sub))) {
+            NavigationLink(state: AppReducer.Path.State.folder(.init(folder: sub))) {
                 Label {
                     HStack {
                         Text(sub.name)
@@ -162,7 +152,7 @@ struct FolderRows: View {
             .listRowBackground(Color.clear)
         }
         ForEach(folder.notes) { note in
-            NavigationLink(state: WikiFeature.Path.State.note(.init(ref: note))) {
+            NavigationLink(state: AppReducer.Path.State.note(.init(ref: note))) {
                 Label {
                     Text(note.title)
                         .font(.system(size: 16))
@@ -204,7 +194,7 @@ struct WikiTagView: View {
 
     var body: some View {
         List(store.notes) { note in
-            NavigationLink(state: WikiFeature.Path.State.note(.init(ref: note))) {
+            NavigationLink(state: AppReducer.Path.State.note(.init(ref: note))) {
                 Label {
                     Text(note.title)
                         .font(.system(size: 16))
@@ -236,7 +226,7 @@ struct FlowTagView: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 ForEach(tags) { tag in
-                    NavigationLink(state: WikiFeature.Path.State.tag(.init(tag: tag.tag))) {
+                    NavigationLink(state: AppReducer.Path.State.tag(.init(tag: tag.tag))) {
                         WikiTagChip(text: "#\(tag.tag) \(tag.count)", palette: palette)
                     }
                     .buttonStyle(.plain)

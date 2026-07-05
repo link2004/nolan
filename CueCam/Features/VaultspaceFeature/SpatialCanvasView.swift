@@ -287,7 +287,7 @@ struct SpatialCanvasView: View {
 
     // MARK: - ヒットテスト(タップ=Wiki / 長押し=詳細)
 
-    private func hitTest(at point: CGPoint, in size: CGSize) -> VaultVideo? {
+    private func hitTest(at point: CGPoint, in size: CGSize) -> (video: VaultVideo, rect: CGRect)? {
         let layouts = computeLayouts(at: Date(), in: size)
         // 手前(orderが大きい)から探す。3Dでは奥のカードは無効
         for card in layouts.sorted(by: { $0.order > $1.order }) {
@@ -299,21 +299,21 @@ struct SpatialCanvasView: View {
                 height: card.size.height
             )
             if rect.insetBy(dx: -4, dy: -4).contains(point) {
-                return card.video
+                return (card.video, rect)
             }
         }
         return nil
     }
 
     private func handleTap(at point: CGPoint, in size: CGSize) {
-        if let video = hitTest(at: point, in: size) {
-            store.send(.videoTapped(video.id))
+        if let hit = hitTest(at: point, in: size) {
+            store.send(.videoTapped(hit.video.id, sourceRect: hit.rect))
         }
     }
 
     private func handleLongPress(at point: CGPoint, in size: CGSize) {
-        if let video = hitTest(at: point, in: size) {
-            store.send(.videoDetailRequested(video.id))
+        if let hit = hitTest(at: point, in: size) {
+            store.send(.videoDetailRequested(hit.video.id))
         }
     }
 

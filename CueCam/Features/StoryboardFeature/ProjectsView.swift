@@ -5,16 +5,13 @@ struct ProjectsView: View {
     @Bindable var store: StoreOf<ProjectsFeature>
 
     var body: some View {
-        NavigationStack(path: $store.scope(state: \.path, action: \.path)) {
-            rootList
-                .navigationTitle("Storyboard")
-                .toolbarBackground(SBTheme.bg, for: .navigationBar)
-                .toolbarColorScheme(.dark, for: .navigationBar)
-        } destination: { store in
-            BoardView(store: store)
-        }
-        .preferredColorScheme(.dark)
-        .task { store.send(.task) }
+        // タブ廃止に伴い、ホームのスタックに積まれる1画面になった(ボードはさらに上へ積む)
+        rootList
+            .navigationTitle("Storyboard")
+            .toolbarBackground(SBTheme.bg, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarColorScheme(.dark, for: .navigationBar)
+            .task { store.send(.task) }
     }
 
     @ViewBuilder
@@ -39,7 +36,7 @@ struct ProjectsView: View {
                         ProjectRow(project: project)
                             .opacity(0.4)
                     } else {
-                        NavigationLink(state: BoardFeature.State(note: project.note, title: project.title)) {
+                        NavigationLink(state: AppReducer.Path.State.board(BoardFeature.State(note: project.note, title: project.title))) {
                             ProjectRow(project: project)
                         }
                     }

@@ -1,43 +1,49 @@
 import ComposableArchitecture
 import SwiftUI
 
+/// アプリのルート画面(ホーム)。タブは無く、四隅のタイポグラフィで遷移する:
+/// 左下 MAKE VIDEO → Storyboard / 右下 WIKI → Wikiルート / 右上 歯車 → 設定。
 struct VaultspaceView: View {
     @Bindable var store: StoreOf<VaultspaceFeature>
+    /// 写真→Wikiノートのズームトランジション(AppViewの@Namespace)
+    let zoomNamespace: Namespace.ID
 
     var body: some View {
-        NavigationStack {
-            content
-                .navigationTitle("Vaultspace")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    // Webのセリフ体モードトグル "3D / FLAT"(タップで切り替え)
-                    ToolbarItem(placement: .principal) {
-                        HStack(spacing: 8) {
-                            modeWord("3D", .cylinder)
-                            Text("/")
-                                .font(.instrumentSerif(22))
-                                .foregroundStyle(VSTheme.ink.opacity(0.32))
-                            modeWord("FLAT", .flat)
-                        }
+        content
+            .navigationTitle("Vaultspace")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                // Webのセリフ体モードトグル "3D / FLAT"(タップで切り替え)
+                ToolbarItem(placement: .principal) {
+                    HStack(spacing: 8) {
+                        modeWord("3D", .cylinder)
+                        Text("/")
+                            .font(.instrumentSerif(22))
+                            .foregroundStyle(VSTheme.ink.opacity(0.32))
+                        modeWord("FLAT", .flat)
                     }
-                    ToolbarItem(placement: .topBarTrailing) {
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    HStack(spacing: 16) {
                         Button {
                             store.send(.refresh)
                         } label: {
                             Image(systemName: "arrow.clockwise")
                                 .foregroundStyle(VSTheme.ink)
                         }
+                        NavigationLink(state: AppReducer.Path.State.settings(SettingsFeature.State())) {
+                            Image(systemName: "gearshape")
+                                .foregroundStyle(VSTheme.ink)
+                        }
                     }
                 }
-                .toolbarBackground(VSTheme.paper, for: .navigationBar)
-                .toolbarBackground(.visible, for: .navigationBar)
-        }
-        // Vaultspaceタブは常に紙のライトテーマで描く(Webと同一の世界観)
-        .preferredColorScheme(.light)
-        .sheet(item: $store.scope(state: \.detail, action: \.detail)) { detailStore in
-            VideoDetailView(store: detailStore)
-        }
-        .task { store.send(.task) }
+            }
+            .toolbarBackground(VSTheme.paper, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .sheet(item: $store.scope(state: \.detail, action: \.detail)) { detailStore in
+                VideoDetailView(store: detailStore)
+            }
+            .task { store.send(.task) }
     }
 
     @ViewBuilder
@@ -57,7 +63,38 @@ struct VaultspaceView: View {
         case .loaded:
             // 3D/FLATは統合キャンバスが1枚で描き、切替時はモーフィングで遷移する
             SpatialCanvasView(store: store)
+                .overlay(alignment: .topLeading) { zoomSourceAnchor }
+                .overlay(alignment: .bottomLeading) {
+                    cornerLink("MAKE VIDEO", state: .storyboard(ProjectsFeature.State()))
+                }
+                .overlay(alignment: .bottomTrailing) {
+                    cornerLink("WIKI", state: .wiki(WikiFeature.State()))
+                }
         }
+    }
+
+    /// タップした写真の矩形に透明なアンカーを重ね、ズームトランジションの発火元にする。
+    @ViewBuilder
+    private var zoomSourceAnchor: some View {
+        if let anchor = store.zoomAnchor {
+            Color.clear
+                .frame(width: anchor.rect.width, height: anchor.rect.height)
+                .matchedTransitionSource(id: anchor.slug, in: zoomNamespace)
+                .offset(x: anchor.rect.minX, y: anchor.rect.minY)
+                .allowsHitTesting(false)
+        }
+    }
+
+    /// Webの四隅タイポグラフィ(透明・セリフ・ink 86%)。
+    private func cornerLink(_ label: String, state: AppReducer.Path.State) -> some View {
+        NavigationLink(state: state) {
+            Text(label)
+                .font(.instrumentSerif(22))
+                .foregroundStyle(VSTheme.ink.opacity(0.86))
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 18)
+        .padding(.bottom, 14)
     }
 
     private func modeWord(_ label: String, _ mode: VaultMode) -> some View {

@@ -19,6 +19,13 @@ struct VaultspaceFeature {
         var loadState: LoadState = .idle
         var zoom: CGFloat = 1
         @Presents var detail: VideoDetailFeature.State?
+        /// ズームトランジションの発火元(タップした写真のスクリーン座標)
+        var zoomAnchor: ZoomAnchor?
+    }
+
+    struct ZoomAnchor: Equatable, Sendable {
+        let slug: String
+        let rect: CGRect
     }
 
     enum Action: BindableAction {
@@ -26,7 +33,7 @@ struct VaultspaceFeature {
         case task
         case refresh
         case loaded(Result<VaultManifest, any Error>)
-        case videoTapped(String)
+        case videoTapped(String, sourceRect: CGRect?)
         case videoDetailRequested(String)
         case detail(PresentationAction<VideoDetailFeature.Action>)
         case delegate(Delegate)
@@ -66,9 +73,13 @@ struct VaultspaceFeature {
                 return .none
 
             // タップ = そのビデオのWikiノートへ(wikiUrlが無いものは詳細シートへフォールバック)
-            case .videoTapped(let id):
+            case .videoTapped(let id, let sourceRect):
                 guard let video = state.videos.first(where: { $0.id == id }) else { return .none }
                 if let ref = Self.wikiRef(for: video) {
+                    // アンカーを先に置いてから遷移(matchedTransitionSourceが1フレーム先行する)
+                    if let sourceRect {
+                        state.zoomAnchor = ZoomAnchor(slug: ref.slug, rect: sourceRect)
+                    }
                     return .send(.delegate(.openWikiNote(ref)))
                 }
                 return .send(.videoDetailRequested(id))

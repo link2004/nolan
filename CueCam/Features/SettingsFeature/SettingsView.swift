@@ -5,7 +5,12 @@ struct SettingsView: View {
     @Bindable var store: StoreOf<SettingsFeature>
 
     var body: some View {
-        NavigationStack {
+        // タブ廃止に伴い、ホームのスタックに積まれる1画面になった
+        settingsForm
+            .task { store.send(.task) }
+    }
+
+    private var settingsForm: some View {
             Form {
                 ForEach(VaultSurface.allCases) { surface in
                     Section(surface.label) {
@@ -50,8 +55,6 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
-        }
-        .task { store.send(.task) }
     }
 
     @ViewBuilder

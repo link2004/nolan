@@ -3,13 +3,6 @@ import Foundation
 
 @Reducer
 struct WikiFeature {
-    @Reducer(state: .equatable)
-    enum Path {
-        case folder(WikiFolderFeature)
-        case note(WikiNoteFeature)
-        case tag(WikiTagFeature)
-    }
-
     @ObservableState
     struct State: Equatable {
         var loadState: LoadState = .idle
@@ -18,7 +11,6 @@ struct WikiFeature {
         var topTags: [TagCount] = []
         var searchQuery = ""
         var searchResults: [WikiSearchHit] = []
-        var path = StackState<Path.State>()
     }
 
     enum Action: BindableAction {
@@ -27,7 +19,6 @@ struct WikiFeature {
         case refresh
         case summaryLoaded(Result<WikiSummary, any Error>)
         case searchResponse([WikiSearchHit])
-        case path(StackActionOf<Path>)
     }
 
     @Dependency(\.wikiClient) var wikiClient
@@ -75,12 +66,8 @@ struct WikiFeature {
             case .searchResponse(let hits):
                 state.searchResults = hits
                 return .none
-
-            case .path:
-                return .none
             }
         }
-        .forEach(\.path, action: \.path)
     }
 
     private func load(_ state: inout State) -> Effect<Action> {
@@ -120,6 +107,7 @@ struct WikiNoteFeature {
         var note: WikiNote?
         var outgoing: [WikiNoteRef] = []
         var backlinks: [WikiNoteRef] = []
+        var clips: [WikiClip] = []
         var isLoading = true
 
         init(ref: WikiNoteRef) {
@@ -130,7 +118,7 @@ struct WikiNoteFeature {
 
     enum Action {
         case task
-        case loaded(WikiNote?, outgoing: [WikiNoteRef], backlinks: [WikiNoteRef])
+        case loaded(WikiNote?, outgoing: [WikiNoteRef], backlinks: [WikiNoteRef], clips: [WikiClip])
     }
 
     @Dependency(\.wikiClient) var wikiClient
@@ -144,7 +132,8 @@ struct WikiNoteFeature {
                 let slug = state.slug
                 return .run { send in
                     // マップ等からWikiタブを経ずに直行した場合、インデックスがまだ無い
-                    if let base = try? serverConfig.baseURL(.wiki) {
+                    let base = try? serverConfig.baseURL(.wiki)
+                    if let base {
                         try? await wikiClient.ensureLoaded(base)
                     }
                     var note = await wikiClient.note(slug)
@@ -162,13 +151,16 @@ struct WikiNoteFeature {
                         }
                     }
                     let backlinks = await wikiClient.backlinks(resolvedSlug)
-                    await send(.loaded(note, outgoing: outgoing, backlinks: backlinks))
+                    // 動画カットはサイトのノートHTMLからのみ取れる(contentIndexには残らない)
+                    let clips = base != nil ? await wikiClient.clips(base!, resolvedSlug) : []
+                    await send(.loaded(note, outgoing: outgoing, backlinks: backlinks, clips: clips))
                 }
 
-            case .loaded(let note, let outgoing, let backlinks):
+            case .loaded(let note, let outgoing, let backlinks, let clips):
                 state.note = note
                 state.outgoing = outgoing
                 state.backlinks = backlinks
+                state.clips = clips
                 state.isLoading = false
                 return .none
             }
