@@ -45,6 +45,16 @@ struct SpatialCanvasView: View {
     private static let transitionDuration: Double = 0.85
     private static let staggerMax: Double = 0.22
     private static let verticalSpread: CGFloat = 0.78
+    /// FLATの世界の広がり(画面比)。タイルを小さく+広がりを増やして重なりを減らす
+    private static let flatSpreadX: CGFloat = 2.6
+    private static let flatSpreadY: CGFloat = 2.0
+
+    /// タイルの既定サイズ(zoom=1)。群全体に対して控えめにして重なりを抑える。
+    private static func tileBaseSize(for id: String) -> (width: CGFloat, height: CGFloat) {
+        let width = 66 + jitter(id, 3) * 34
+        let portrait = jitter(id, 2) > 0.5
+        return (width, portrait ? width * 1.16 : width * 0.72)
+    }
 
     /// 1タイルの描画パラメータ(レイアウト計算とヒットテストで共有)。
     private struct CardLayout {
@@ -129,8 +139,8 @@ struct SpatialCanvasView: View {
 
             // --- FLAT座標(zoom=1が既定サイズ。ピンチはカメラが寄る=世界が広がる) ---
             let norm = flatPositions[video.id] ?? CGPoint(x: 0.5, y: 0.5)
-            let flatX = size.width / 2 + (norm.x - 0.5) * size.width * 2.3 * effZoom + panX
-            let flatY = size.height / 2 + (norm.y - 0.5) * size.height * 1.7 * effZoom + panY
+            let flatX = size.width / 2 + (norm.x - 0.5) * size.width * Self.flatSpreadX * effZoom + panX
+            let flatY = size.height / 2 + (norm.y - 0.5) * size.height * Self.flatSpreadY * effZoom + panY
             let flatScale = 1.0 * effZoom
 
             // --- 補間 + 散開バースト ---
@@ -144,10 +154,7 @@ struct SpatialCanvasView: View {
             let tilt = Double(Self.jitter(video.id, 7) - 0.5) * 9 * Double(wave)
 
             let scale = Self.lerp(cylScale, flatScale, t)
-            // 既定(zoom=1・FLAT)のタイルサイズ = スクリーンショット基準の固定値
-            let baseWidth = 84 + Self.jitter(video.id, 3) * 44
-            let portrait = Self.jitter(video.id, 2) > 0.5
-            let baseHeight = portrait ? baseWidth * 1.16 : baseWidth * 0.72
+            let (baseWidth, baseHeight) = Self.tileBaseSize(for: video.id)
 
             return CardLayout(
                 video: video,
@@ -427,8 +434,69 @@ struct SpatialCanvasView: View {
                 y: CGFloat((point.y - minY) / spanY)
             )
         }
-        flatPositions = result
+        flatPositions = relaxOverlaps(result)
         rebuildAxisLabels()
+    }
+
+    /// 重なり解消の緩和計算。zoom=1のFLATワールドをptで再現し、
+    /// タイル同士が食い込んでいるペアを浅い軸方向に押し離す(40イテレーション)。
+    /// マップの全体形状(クラスタ感)は保ちつつ、密集部だけほどける。
+    private func relaxOverlaps(_ normalized: [String: CGPoint]) -> [String: CGPoint] {
+        // 代表的な画面サイズでのワールド寸法(比率が合っていれば十分)
+        let worldW: CGFloat = 393 * Self.flatSpreadX
+        let worldH: CGFloat = 760 * Self.flatSpreadY
+        let gap: CGFloat = 10  // タイル間に最低確保する余白
+
+        struct Body {
+            let id: String
+            var x: CGFloat
+            var y: CGFloat
+            let halfW: CGFloat
+            let halfH: CGFloat
+        }
+        var bodies: [Body] = normalized.map { id, norm in
+            let (w, h) = Self.tileBaseSize(for: id)
+            return Body(id: id, x: norm.x * worldW, y: norm.y * worldH, halfW: (w + gap) / 2, halfH: (h + gap) / 2)
+        }
+        guard bodies.count > 1 else { return normalized }
+
+        for _ in 0..<40 {
+            var moved = false
+            for i in 0..<(bodies.count - 1) {
+                for j in (i + 1)..<bodies.count {
+                    let dx = bodies[j].x - bodies[i].x
+                    let dy = bodies[j].y - bodies[i].y
+                    let overlapX = bodies[i].halfW + bodies[j].halfW - abs(dx)
+                    let overlapY = bodies[i].halfH + bodies[j].halfH - abs(dy)
+                    guard overlapX > 0, overlapY > 0 else { continue }
+                    moved = true
+                    // 食い込みの浅い軸方向へ半分ずつ押し離す
+                    if overlapX < overlapY {
+                        let push = overlapX / 2 * (dx >= 0 ? 1 : -1)
+                        bodies[i].x -= push
+                        bodies[j].x += push
+                    } else {
+                        let push = overlapY / 2 * (dy >= 0 ? 1 : -1)
+                        bodies[i].y -= push
+                        bodies[j].y += push
+                    }
+                }
+            }
+            if !moved { break }
+        }
+
+        // 押し出しで広がった分ごと0..1に再正規化(全体は常に収まる)
+        let xs = bodies.map(\.x)
+        let ys = bodies.map(\.y)
+        let minX = xs.min()!, maxX = xs.max()!
+        let minY = ys.min()!, maxY = ys.max()!
+        let spanX = max(maxX - minX, 1)
+        let spanY = max(maxY - minY, 1)
+        var result: [String: CGPoint] = [:]
+        for body in bodies {
+            result[body.id] = CGPoint(x: (body.x - minX) / spanX, y: (body.y - minY) / spanY)
+        }
+        return result
     }
 
     /// 分類軸ラベルを組み立てる(見た目だけのモック)。
