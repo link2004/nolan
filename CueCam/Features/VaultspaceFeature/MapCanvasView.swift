@@ -10,6 +10,9 @@ struct VaultspaceView: View {
 
     var body: some View {
         content
+            // セーフエリア(ステータスバー/ホームインジケータ)まで紙色で貫通させ、
+            // システム白との色割れをなくす
+            .background(VSTheme.paper.ignoresSafeArea())
             .navigationTitle("Vaultspace")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
