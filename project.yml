@@ -1,0 +1,35 @@
+name: CueCam
+options:
+  bundleIdPrefix: com.cuecam
+  deploymentTarget:
+    iOS: "18.0"
+packages:
+  ComposableArchitecture:
+    url: https://github.com/pointfreeco/swift-composable-architecture
+    from: 1.17.0
+settings:
+  base:
+    DEVELOPMENT_TEAM: 7LF5Z5CUCR
+    SWIFT_VERSION: "6.0"
+targets:
+  CueCam:
+    type: application
+    platform: iOS
+    sources:
+      - CueCam
+    dependencies:
+      - package: ComposableArchitecture
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.cuecam.app
+        TARGETED_DEVICE_FAMILY: "1"
+    info:
+      path: CueCam/Info.plist
+      properties:
+        CFBundleDisplayName: CueCam
+        NSCameraUsageDescription: AIの指示に従って動画を撮影するためにカメラを使用します
+        NSMicrophoneUsageDescription: 動画撮影時に音声を録音するためにマイクを使用します
+        NSPhotoLibraryAddUsageDescription: 撮影した動画をフォトライブラリに保存します
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
