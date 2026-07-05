@@ -1,10 +1,17 @@
 import ComposableArchitecture
 import Foundation
 
+/// Webの "3D / FLAT" トグルに対応する表示モード。
+enum VaultMode: String, Equatable, Sendable {
+    case cylinder  // 3D: 回転するシリンダー
+    case flat      // FLAT: 2Dマップ
+}
+
 @Reducer
 struct VaultspaceFeature {
     @ObservableState
     struct State: Equatable {
+        var mode: VaultMode = .cylinder
         var videos: [VaultVideo] = []
         var clipsById: [String: VaultClip] = [:]
         var stillsById: [String: VaultStill] = [:]
