@@ -13,8 +13,7 @@ struct BoardView: View {
             .navigationBarTitleDisplayMode(.inline)
             .task { store.send(.task) }
             .fullScreenCover(item: $selected) { reference in
-                if let base = store.base,
-                   let url = MediaURL.url(base: base, key: reference.path) {
+                if let url = MediaURL.url(key: reference.path) {
                     FullscreenClipView(url: url, reference: reference)
                 }
             }
@@ -24,7 +23,7 @@ struct BoardView: View {
     private var content: some View {
         switch store.loadState {
         case .idle, .loading:
-            ProgressView("ボードを読み込み中…")
+            ProgressView("Loading board…")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .failed(let message):
             ErrorRetryView(message: message) { store.send(.refresh) }
@@ -34,7 +33,7 @@ struct BoardView: View {
                     LazyVStack(alignment: .leading, spacing: 28) {
                         CoverageMeter(coverage: board.coverage)
                         ForEach(board.beats) { beat in
-                            BeatSectionView(beat: beat, base: store.base, selected: $selected)
+                            BeatSectionView(beat: beat, selected: $selected)
                         }
                     }
                     .padding(.vertical)
@@ -52,7 +51,7 @@ struct CoverageMeter: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text("カバレッジ")
+                Text("Coverage")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -70,7 +69,6 @@ struct CoverageMeter: View {
 /// 1 beat分のセクション: 見出し(番号・timecode・heading・VO) + 横スクロールのカードレール。
 struct BeatSectionView: View {
     let beat: SBBeat
-    let base: URL?
     @Binding var selected: SBReference?
 
     var body: some View {
@@ -80,7 +78,7 @@ struct BeatSectionView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: 12) {
                     ForEach(beat.lines) { line in
-                        LineCardView(line: line, base: base, selected: $selected)
+                        LineCardView(line: line, selected: $selected)
                     }
                 }
                 .padding(.horizontal)
@@ -123,7 +121,6 @@ struct BeatSectionView: View {
 /// カードレールの1枚。メディア(16:9) + スクリプト + timecode + techniqueチップ。
 struct LineCardView: View {
     let line: SBLine
-    let base: URL?
     @Binding var selected: SBReference?
 
     private static let cardWidth: CGFloat = 260
@@ -140,12 +137,12 @@ struct LineCardView: View {
 
     @ViewBuilder
     private var media: some View {
-        if let reference = line.reference, let base,
-           let url = MediaURL.url(base: base, key: reference.path) {
+        if let reference = line.reference,
+           let url = MediaURL.url(key: reference.path) {
             if reference.isClip {
                 InlineClipPlayer(
                     url: url,
-                    posterURL: reference.poster.flatMap { MediaURL.url(base: base, key: $0) }
+                    posterURL: reference.poster.flatMap { MediaURL.url(key: $0) }
                 )
                 .contentShape(Rectangle())
                 .onTapGesture { selected = reference }
@@ -161,7 +158,7 @@ struct LineCardView: View {
                 .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [6, 4]))
                 .foregroundStyle(.tertiary)
                 .overlay {
-                    Text("参照未設定")
+                    Text("No reference yet")
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                 }

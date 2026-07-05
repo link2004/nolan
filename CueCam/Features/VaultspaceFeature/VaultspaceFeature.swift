@@ -20,7 +20,13 @@ struct VaultspaceFeature {
         case refresh
         case loaded(Result<VaultManifest, any Error>)
         case videoTapped(String)
+        case videoDetailRequested(String)
         case detail(PresentationAction<VideoDetailFeature.Action>)
+        case delegate(Delegate)
+
+        enum Delegate: Equatable {
+            case openWikiNote(WikiNoteRef)
+        }
     }
 
     @Dependency(\.vaultspaceClient) var vaultspaceClient
@@ -52,7 +58,15 @@ struct VaultspaceFeature {
                 state.loadState = .failed(error.localizedDescription)
                 return .none
 
+            // タップ = そのビデオのWikiノートへ(wikiUrlが無いものは詳細シートへフォールバック)
             case .videoTapped(let id):
+                guard let video = state.videos.first(where: { $0.id == id }) else { return .none }
+                if let ref = Self.wikiRef(for: video) {
+                    return .send(.delegate(.openWikiNote(ref)))
+                }
+                return .send(.videoDetailRequested(id))
+
+            case .videoDetailRequested(let id):
                 guard let video = state.videos.first(where: { $0.id == id }) else { return .none }
                 let clips = (video.clipIds ?? []).compactMap { state.clipsById[$0] }
                 let stills = (video.stillIds ?? []).compactMap { state.stillsById[$0] }
@@ -66,11 +80,24 @@ struct VaultspaceFeature {
 
             case .detail:
                 return .none
+
+            case .delegate:
+                return .none
             }
         }
         .ifLet(\.$detail, action: \.detail) {
             VideoDetailFeature()
         }
+    }
+
+    /// wikiUrl(例: https://wiki.tenkstudios.com/References/Library/…)のパスをデコードして
+    /// contentIndexのslugに変換する。
+    static func wikiRef(for video: VaultVideo) -> WikiNoteRef? {
+        guard let raw = video.wikiUrl, let url = URL(string: raw) else { return nil }
+        let slug = (url.path.removingPercentEncoding ?? url.path)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard !slug.isEmpty else { return nil }
+        return WikiNoteRef(slug: slug, title: video.title)
     }
 
     private func load(_ state: inout State) -> Effect<Action> {

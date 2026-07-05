@@ -18,7 +18,7 @@ struct ProjectsView: View {
     private var rootList: some View {
         switch store.loadState {
         case .idle, .loading:
-            ProgressView("プロジェクトを読み込み中…")
+            ProgressView("Loading projects…")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .failed(let message):
             ErrorRetryView(message: message) { store.send(.refresh) }
@@ -26,11 +26,11 @@ struct ProjectsView: View {
             List(store.projects) { project in
                 if project.hasStoryboard == false {
                     // ストーリーボード未作成のプロジェクトは遷移不可
-                    ProjectRow(project: project, base: store.base)
+                    ProjectRow(project: project)
                         .opacity(0.4)
                 } else {
                     NavigationLink(state: BoardFeature.State(note: project.note, title: project.title)) {
-                        ProjectRow(project: project, base: store.base)
+                        ProjectRow(project: project)
                     }
                 }
             }
@@ -42,7 +42,6 @@ struct ProjectsView: View {
 /// プロジェクト一覧の1行。サムネイル + タイトル + client/statusバッジ + カバレッジバー。
 struct ProjectRow: View {
     let project: SBProject
-    let base: URL?
 
     var body: some View {
         HStack(spacing: 12) {
@@ -70,9 +69,7 @@ struct ProjectRow: View {
 
     @ViewBuilder
     private var thumbnail: some View {
-        let url = base.flatMap { base in
-            project.thumbnail.flatMap { MediaURL.url(base: base, key: $0) }
-        }
+        let url = project.thumbnail.flatMap { MediaURL.url(key: $0) }
         AsyncImage(url: url) { image in
             image.resizable().scaledToFill()
         } placeholder: {

@@ -7,7 +7,7 @@ enum HTTPError: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .badStatus(let code, let url): "HTTP \(code): \(url.absoluteString)"
-        case .invalidURL(let s): "不正なURL: \(s)"
+        case .invalidURL(let s): "Invalid URL: \(s)"
         }
     }
 }

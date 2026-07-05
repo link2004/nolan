@@ -26,7 +26,7 @@
 		<true/>
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>MacのローカルサーバーからVaultのメディアを読み込むためにローカルネットワークを使用します</string>
+	<string>Local network access is used to load vault data from the local servers on your Mac.</string>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UISupportedInterfaceOrientations</key>

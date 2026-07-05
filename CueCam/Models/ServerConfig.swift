@@ -17,11 +17,13 @@ enum VaultSurface: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-/// シミュレータはMac上で動くため localhost が既定。実機ではMacのIP/ホスト名に変更する。
+/// 実機からMacのローカルサーバーへ届くよう、MacのLAN IPを既定にする(設定タブで変更可能)。
+/// media はR2公開ホスト — 画像・動画はローカルサーバーを経由せずここから直接取得する。
 enum DefaultURLs {
-    static let wiki = "http://localhost:8750"
-    static let storyboard = "http://localhost:8731"
-    static let vaultspace = "http://localhost:8765"
+    static let wiki = "http://192.168.0.215:8750"
+    static let storyboard = "http://192.168.0.215:8731"
+    static let vaultspace = "http://192.168.0.215:8766"
+    static let media = "https://media.tenkstudios.com"
 }
 
 enum LoadState: Equatable, Sendable {

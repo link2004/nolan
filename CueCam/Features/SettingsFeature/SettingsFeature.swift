@@ -14,11 +14,13 @@ struct SettingsFeature {
     struct State: Equatable {
         var urls: [VaultSurface: String] = [:]
         var probes: [VaultSurface: ProbeStatus] = [:]
+        var mediaURL = ""
     }
 
     enum Action {
         case task
         case urlChanged(VaultSurface, String)
+        case mediaURLChanged(String)
         case probeAll
         case probeResult(VaultSurface, ProbeStatus)
     }
@@ -32,7 +34,13 @@ struct SettingsFeature {
                 for surface in VaultSurface.allCases {
                     state.urls[surface] = serverConfig.baseURLString(surface)
                 }
+                state.mediaURL = serverConfig.mediaBaseString()
                 return .send(.probeAll)
+
+            case .mediaURLChanged(let value):
+                state.mediaURL = value
+                serverConfig.setMediaBase(value)
+                return .none
 
             case .urlChanged(let surface, let value):
                 state.urls[surface] = value
@@ -67,7 +75,7 @@ struct SettingsFeature {
             case .vaultspace: "/api/space"
             }
             guard let url = URL(string: path, relativeTo: base)?.absoluteURL else {
-                return .failed("不正なURL")
+                return .failed("Invalid URL")
             }
             var request = URLRequest(url: url, timeoutInterval: 5)
             if surface == .wiki { request.httpMethod = "HEAD" }

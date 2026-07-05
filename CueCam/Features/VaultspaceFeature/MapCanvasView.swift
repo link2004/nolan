@@ -28,7 +28,7 @@ struct VaultspaceView: View {
     private var content: some View {
         switch store.loadState {
         case .idle, .loading:
-            ProgressView("マニフェストを読み込み中…")
+            ProgressView("Loading manifest…")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .failed(let message):
             ErrorRetryView(message: message) { store.send(.refresh) }
@@ -91,8 +91,8 @@ struct MapCanvasView: View {
     private func thumbnail(for video: VaultVideo) -> some View {
         VStack(spacing: 4) {
             Group {
-                if let base = store.base, let posterUrl = video.posterUrl,
-                   let url = MediaURL.url(base: base, mediaPath: posterUrl) {
+                if let posterUrl = video.posterUrl,
+                   let url = MediaURL.url(mediaPath: posterUrl) {
                     AsyncImage(url: url) { image in
                         image.resizable().aspectRatio(contentMode: .fill)
                     } placeholder: {
@@ -112,7 +112,9 @@ struct MapCanvasView: View {
                 .lineLimit(1)
                 .frame(width: Self.thumbSize.width)
         }
+        // タップ = Wikiノートへ / 長押し = クリップ・スチルの詳細シート
         .onTapGesture { store.send(.videoTapped(video.id)) }
+        .onLongPressGesture { store.send(.videoDetailRequested(video.id)) }
     }
 
     /// space.positions(なければvideo.map)のmin/maxを取り、パディング込みの

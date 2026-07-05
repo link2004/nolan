@@ -10,7 +10,7 @@ struct SettingsView: View {
                 ForEach(VaultSurface.allCases) { surface in
                     Section(surface.label) {
                         TextField(
-                            "http://<MacのIP>:ポート",
+                            "http://<Mac IP>:port",
                             text: Binding(
                                 get: { store.urls[surface] ?? "" },
                                 set: { store.send(.urlChanged(surface, $0)) }
@@ -26,12 +26,30 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    Button("接続を確認") { store.send(.probeAll) }
+                    TextField(
+                        "https://media.example.com",
+                        text: Binding(
+                            get: { store.mediaURL },
+                            set: { store.send(.mediaURLChanged($0)) }
+                        )
+                    )
+                    .keyboardType(.URL)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .font(.callout.monospaced())
+                } header: {
+                    Text("Media")
                 } footer: {
-                    Text("シミュレータでは localhost、実機ではMacのIPアドレス(例: http://192.168.1.10:8750)を指定してください。接続できない場合はiOS設定のローカルネットワーク許可を確認してください。")
+                    Text("Images and clips load directly from this host (Cloudflare R2), not through the Mac.")
+                }
+
+                Section {
+                    Button("Check connections") { store.send(.probeAll) }
+                } footer: {
+                    Text("Use localhost in the simulator, or your Mac's LAN IP on a device (e.g. http://192.168.0.215:8750). If a server is unreachable, check Local Network permission in iOS Settings.")
                 }
             }
-            .navigationTitle("設定")
+            .navigationTitle("Settings")
         }
         .task { store.send(.task) }
     }
@@ -42,13 +60,13 @@ struct SettingsView: View {
             switch status {
             case .unknown:
                 Circle().fill(.gray).frame(width: 10, height: 10)
-                Text("未確認").foregroundStyle(.secondary)
+                Text("Not checked").foregroundStyle(.secondary)
             case .checking:
                 ProgressView().controlSize(.small)
-                Text("確認中…").foregroundStyle(.secondary)
+                Text("Checking…").foregroundStyle(.secondary)
             case .ok(let ms):
                 Circle().fill(.green).frame(width: 10, height: 10)
-                Text("接続OK (\(ms)ms)")
+                Text("Connected (\(ms)ms)")
             case .failed(let message):
                 Circle().fill(.red).frame(width: 10, height: 10)
                 Text(message).foregroundStyle(.red).lineLimit(2)

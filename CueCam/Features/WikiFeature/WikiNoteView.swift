@@ -32,14 +32,14 @@ struct WikiNoteView: View {
                         .font(.body)
                         .textSelection(.enabled)
 
-                    linkList("リンク", refs: store.outgoing, icon: "arrow.up.right")
-                    linkList("バックリンク", refs: store.backlinks, icon: "arrow.uturn.backward")
+                    linkList("Links", refs: store.outgoing, icon: "arrow.up.right")
+                    linkList("Backlinks", refs: store.backlinks, icon: "arrow.uturn.backward")
                 } else if store.isLoading {
                     ProgressView()
                         .frame(maxWidth: .infinity)
                         .padding(.top, 60)
                 } else {
-                    Text("ノートが見つかりません")
+                    Text("Note not found")
                         .foregroundStyle(.secondary)
                 }
             }

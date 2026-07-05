@@ -15,7 +15,7 @@ struct AppReducer {
         var storyboard = ProjectsFeature.State()
         var vaultspace = VaultspaceFeature.State()
         var settings = SettingsFeature.State()
-        var tab: Tab = .wiki
+        var tab: Tab = .vaultspace
     }
 
     enum Action: BindableAction {
@@ -39,6 +39,17 @@ struct AppReducer {
         }
         Scope(state: \.settings, action: \.settings) {
             SettingsFeature()
+        }
+        Reduce { state, action in
+            switch action {
+            // マップの写真タップ → Wikiタブへ切り替えて該当ノートをプッシュ
+            case .vaultspace(.delegate(.openWikiNote(let ref))):
+                state.tab = .wiki
+                state.wiki.path.append(.note(WikiNoteFeature.State(ref: ref)))
+                return .none
+            default:
+                return .none
+            }
         }
     }
 }

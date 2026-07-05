@@ -27,7 +27,7 @@ struct VideoDetailView: View {
                 }
 
                 if let wikiUrl = store.video.wikiUrl, let url = URL(string: wikiUrl) {
-                    Link("Wikiで開く", destination: url)
+                    Link("Open in Wiki", destination: url)
                         .font(.callout)
                 }
             }
@@ -78,7 +78,7 @@ struct VideoDetailView: View {
 
     private var clipRail: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("クリップ")
+            Text("Clips")
                 .font(.headline)
 
             ScrollView(.horizontal, showsIndicators: false) {
@@ -94,11 +94,11 @@ struct VideoDetailView: View {
     @ViewBuilder
     private func clipCell(_ clip: VaultClip) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            if let base = store.base, let mediaUrl = clip.mediaUrl,
-               let url = MediaURL.url(base: base, mediaPath: mediaUrl) {
+            if let mediaUrl = clip.mediaUrl,
+               let url = MediaURL.url(mediaPath: mediaUrl) {
                 InlineClipPlayer(
                     url: url,
-                    posterURL: clip.posterUrl.flatMap { MediaURL.url(base: base, mediaPath: $0) }
+                    posterURL: clip.posterUrl.flatMap { MediaURL.url(mediaPath: $0) }
                 )
                 .frame(width: 220, height: 124)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
@@ -123,7 +123,7 @@ struct VideoDetailView: View {
 
     private var stillGrid: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("スチル")
+            Text("Stills")
                 .font(.headline)
 
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
@@ -137,8 +137,8 @@ struct VideoDetailView: View {
     private func stillCell(_ still: VaultStill) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Group {
-                if let base = store.base, let mediaUrl = still.mediaUrl,
-                   let url = MediaURL.url(base: base, mediaPath: mediaUrl) {
+                if let mediaUrl = still.mediaUrl,
+                   let url = MediaURL.url(mediaPath: mediaUrl) {
                     AsyncImage(url: url) { image in
                         image.resizable().aspectRatio(contentMode: .fill)
                     } placeholder: {

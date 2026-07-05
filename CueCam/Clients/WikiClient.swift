@@ -64,6 +64,13 @@ actor WikiIndexStore {
         )
     }
 
+    /// インデックス未ロード時だけロードする(マップ→ノート直行など、Wikiタブを経ない導線用)。
+    func ensureLoaded(base: URL) async throws {
+        if notes.isEmpty {
+            _ = try await load(base: base)
+        }
+    }
+
     func note(slug: String) -> WikiNote? { notes[slug] }
 
     func resolve(link: String) -> WikiNoteRef? {
@@ -167,6 +174,7 @@ actor WikiIndexStore {
 @DependencyClient
 struct WikiClient {
     var load: @Sendable (_ base: URL) async throws -> WikiSummary
+    var ensureLoaded: @Sendable (_ base: URL) async throws -> Void
     var note: @Sendable (_ slug: String) async -> WikiNote?
     var resolveLink: @Sendable (_ link: String) async -> WikiNoteRef?
     var backlinks: @Sendable (_ slug: String) async -> [WikiNoteRef] = { _ in [] }
@@ -177,6 +185,7 @@ struct WikiClient {
 extension WikiClient: DependencyKey {
     static let liveValue = WikiClient(
         load: { try await WikiIndexStore.shared.load(base: $0) },
+        ensureLoaded: { try await WikiIndexStore.shared.ensureLoaded(base: $0) },
         note: { await WikiIndexStore.shared.note(slug: $0) },
         resolveLink: { await WikiIndexStore.shared.resolve(link: $0) },
         backlinks: { await WikiIndexStore.shared.backlinks(slug: $0) },

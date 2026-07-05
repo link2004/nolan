@@ -8,7 +8,7 @@ struct WikiView: View {
         NavigationStack(path: $store.scope(state: \.path, action: \.path)) {
             rootList
                 .navigationTitle("Wiki")
-                .searchable(text: $store.searchQuery, prompt: "ノートを検索")
+                .searchable(text: $store.searchQuery, prompt: "Search notes")
         } destination: { store in
             switch store.case {
             case .folder(let store):
@@ -26,7 +26,7 @@ struct WikiView: View {
     private var rootList: some View {
         switch store.loadState {
         case .idle, .loading:
-            ProgressView("インデックスを読み込み中…")
+            ProgressView("Loading index…")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .failed(let message):
             ErrorRetryView(message: message) { store.send(.refresh) }
@@ -35,7 +35,7 @@ struct WikiView: View {
                 if !store.searchQuery.isEmpty {
                     searchSection
                 } else if let root = store.root {
-                    Section("\(store.noteCount) ノート") {
+                    Section("\(store.noteCount) notes") {
                         FolderRows(folder: root)
                     }
                     if !store.topTags.isEmpty {
@@ -48,9 +48,9 @@ struct WikiView: View {
     }
 
     private var searchSection: some View {
-        Section("検索結果") {
+        Section("Results") {
             if store.searchResults.isEmpty {
-                Text("該当なし").foregroundStyle(.secondary)
+                Text("No matches").foregroundStyle(.secondary)
             }
             ForEach(store.searchResults) { hit in
                 NavigationLink(state: WikiFeature.Path.State.note(.init(ref: hit.ref))) {
@@ -64,7 +64,7 @@ struct WikiView: View {
     }
 
     private var tagSection: some View {
-        Section("タグ") {
+        Section("Tags") {
             FlowTagView(tags: store.topTags)
         }
     }
@@ -152,11 +152,11 @@ struct ErrorRetryView: View {
 
     var body: some View {
         ContentUnavailableView {
-            Label("読み込みに失敗", systemImage: "wifi.exclamationmark")
+            Label("Failed to load", systemImage: "wifi.exclamationmark")
         } description: {
             Text(message)
         } actions: {
-            Button("再試行", action: retry)
+            Button("Retry", action: retry)
                 .buttonStyle(.borderedProminent)
         }
     }

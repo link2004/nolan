@@ -65,7 +65,7 @@ struct FullscreenClipView: View {
                 }
                 if let source = reference.sourceUrl, let sourceURL = URL(string: source) {
                     Link(destination: sourceURL) {
-                        Label("出典", systemImage: "arrow.up.right.square")
+                        Label("Source", systemImage: "arrow.up.right.square")
                     }
                 }
             }

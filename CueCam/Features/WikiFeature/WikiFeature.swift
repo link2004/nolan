@@ -134,6 +134,7 @@ struct WikiNoteFeature {
     }
 
     @Dependency(\.wikiClient) var wikiClient
+    @Dependency(\.serverConfig) var serverConfig
 
     var body: some ReducerOf<Self> {
         Reduce { state, action in
@@ -142,15 +143,25 @@ struct WikiNoteFeature {
                 guard state.note == nil else { return .none }
                 let slug = state.slug
                 return .run { send in
-                    let note = await wikiClient.note(slug)
+                    // マップ等からWikiタブを経ずに直行した場合、インデックスがまだ無い
+                    if let base = try? serverConfig.baseURL(.wiki) {
+                        try? await wikiClient.ensureLoaded(base)
+                    }
+                    var note = await wikiClient.note(slug)
+                    // slugの綴りずれ(エンコード差など)は末尾コンポーネントで再解決
+                    if note == nil, let last = slug.split(separator: "/").last,
+                       let ref = await wikiClient.resolveLink(String(last)) {
+                        note = await wikiClient.note(ref.slug)
+                    }
+                    let resolvedSlug = note?.slug ?? slug
                     var outgoing: [WikiNoteRef] = []
                     for link in note?.links ?? [] {
-                        if let ref = await wikiClient.resolveLink(link), ref.slug != slug,
+                        if let ref = await wikiClient.resolveLink(link), ref.slug != resolvedSlug,
                            !outgoing.contains(ref) {
                             outgoing.append(ref)
                         }
                     }
-                    let backlinks = await wikiClient.backlinks(slug)
+                    let backlinks = await wikiClient.backlinks(resolvedSlug)
                     await send(.loaded(note, outgoing: outgoing, backlinks: backlinks))
                 }
 

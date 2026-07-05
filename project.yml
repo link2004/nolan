@@ -29,12 +29,12 @@ targets:
         CFBundleDisplayName: CueCam
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
-        NSLocalNetworkUsageDescription: MacのローカルサーバーからVaultのメディアを読み込むためにローカルネットワークを使用します
+        NSLocalNetworkUsageDescription: Local network access is used to load vault data from the local servers on your Mac.
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
   # ShootFeature(スクリプト付き撮影フロー)を単体で実機起動するための開発用シェル。
-  # CueCam本体のルート再構築後にタブとして統合し、このターゲットは削除予定 (ADR-002)
+  # CueCam本体への統合方針決定後に削除予定 (ADR-003)
   ShootCam:
     type: application
     platform: iOS
@@ -55,8 +55,8 @@ targets:
       path: ShootCam/Info.plist
       properties:
         CFBundleDisplayName: ShootCam
-        NSCameraUsageDescription: スクリプトに従って動画を撮影するためにカメラを使用します
-        NSMicrophoneUsageDescription: 動画撮影時に音声を録音するためにマイクを使用します
+        NSCameraUsageDescription: ShootCam uses the camera to record video for each scripted shot
+        NSMicrophoneUsageDescription: ShootCam uses the microphone to record audio while filming
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationLandscapeRight

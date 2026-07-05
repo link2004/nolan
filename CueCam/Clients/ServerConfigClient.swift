@@ -7,6 +7,8 @@ import Foundation
 struct ServerConfigClient {
     var baseURLString: @Sendable (VaultSurface) -> String = { _ in "" }
     var setBaseURL: @Sendable (VaultSurface, String) -> Void
+    var mediaBaseString: @Sendable () -> String = { DefaultURLs.media }
+    var setMediaBase: @Sendable (String) -> Void
 
     func baseURL(_ surface: VaultSurface) throws -> URL {
         try HTTP.baseURL(baseURLString(surface))
@@ -34,6 +36,17 @@ extension ServerConfigClient: DependencyKey {
                 UserDefaults.standard.removeObject(forKey: key(surface))
             } else {
                 UserDefaults.standard.set(trimmed, forKey: key(surface))
+            }
+        },
+        mediaBaseString: {
+            UserDefaults.standard.string(forKey: MediaURL.configKey) ?? DefaultURLs.media
+        },
+        setMediaBase: { value in
+            let trimmed = value.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty {
+                UserDefaults.standard.removeObject(forKey: MediaURL.configKey)
+            } else {
+                UserDefaults.standard.set(trimmed, forKey: MediaURL.configKey)
             }
         }
     )
