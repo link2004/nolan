@@ -1,13 +1,14 @@
 import ComposableArchitecture
 import SwiftUI
 
-/// 3D(シリンダー)と FLAT(2Dマップ)を1枚のキャンバスで描く統合ビュー。
-/// 各カードの位置・スケール・透明度をシリンダー座標とマップ座標の間で補間し、
-/// モード切替はカードごとに時間差をつけた散開(スタッガー)モーフィングで遷移する。
+/// 3D(シリンダー)と FLAT(2Dマップ)を1枚の`Canvas`(Metal即時描画)で描く統合ビュー。
 ///
-/// シリンダーはWebと同じ配置則: z=(cos+1)/2, scale=0.45+z*0.82, alpha=0.38+z*0.5,
-/// 自動スピン0.052rad/s。3Dは横ドラッグ=回転(指数減衰モメンタム)、FLATはドラッグ=パン。
-/// ピンチは共通ズーム。描画はProMotionのフルリフレッシュレート。
+/// Webと同じ設計: ビュー階層を持たず、毎フレーム90枚のタイルを直接描画する。
+/// SwiftUIビュー90枚を120Hzで差分評価する構造的な重さを丸ごと除去した。
+/// - 配置則(Web準拠): z=(cos+1)/2, scale=0.45+z*0.82, alpha=0.38+z*0.5, 自動スピン0.052rad/s
+/// - 遷移: from/toを明示したトゥイーン + カードごとのスタッガー + cineイージング + バースト
+/// - ズーム: カメラモデル。FLATはピンチ位置を不動点に世界が寄る、3Dはドリーイン
+/// - FLATの既定(zoom=1)のタイルサイズが基準。起動時は必ずこの見た目
 struct SpatialCanvasView: View {
     @Bindable var store: StoreOf<VaultspaceFeature>
 
@@ -16,62 +17,81 @@ struct SpatialCanvasView: View {
     @State private var dragDelta: Double = 0
     @State private var isDragging = false
     @State private var spinEpoch = Date()
-    // フリックの指数減衰モメンタム(rad/s、τ秒で減衰し自動スピンに溶ける)
+    // フリックの指数減衰モメンタム(τ秒で減衰し自動スピンに溶ける)
     @State private var flingVelocity: Double = 0
     @State private var flingEpoch = Date()
-    // 共通ズーム / FLATパン
+    // カメラ(共通ズーム / FLATパン)
     @State private var zoom: CGFloat = 1
-    @State private var gestureZoom: CGFloat = 1
     @State private var panOffset: CGSize = .zero
     @State private var dragPan: CGSize = .zero
-    // モード遷移(0=3D, 1=FLAT)。TimelineViewのtickで自前トゥイーン
+    // ピンチ中の基準値(ピンチ位置を不動点にするための開始スナップショット)
+    @State private var pinchAnchor: CGPoint?
+    @State private var pinchStartZoom: CGFloat = 1
+    @State private var pinchStartPan: CGSize = .zero
+    // モード遷移: from→to を明示(モード切替時に現在位置から張り直す)
     @State private var transitionStart: Date?
-    @State private var tAtStart: Double = 0
-    // FLAT座標はビデオ一覧が変わった時だけ正規化し直す(毎フレーム計算しない)
+    @State private var tFrom: Double = 0
+    @State private var tTo: Double = 0
+    // 長押しの位置(タッチ追跡)
+    @State private var lastTouch: CGPoint = .zero
+    // FLAT座標はビデオ一覧が変わった時だけ正規化し直す
     @State private var flatPositions: [String: CGPoint] = [:]
+    // 背景の分類軸ラベル(モック寄り: 実タイプがあればクラスタ重心、なければ固定配置)
+    @State private var axisLabels: [(label: String, norm: CGPoint)] = []
 
-    private static let spinRate = 0.052                     // rad/s (Webと同値)
-    private static let flingTau = 0.85                      // モメンタム減衰の時定数(s)
-    private static let zoomRange: ClosedRange<CGFloat> = 0.5...2.6
+    private static let spinRate = 0.052
+    private static let flingTau = 0.85
+    private static let zoomRange: ClosedRange<CGFloat> = 0.5...3.0
     private static let transitionDuration: Double = 0.85
-    /// カードごとの出発遅延の最大値。全体が一斉に動かず波のように散開する
     private static let staggerMax: Double = 0.22
-    /// 縦方向の散らばり(画面高さに対する比)
     private static let verticalSpread: CGFloat = 0.78
+
+    /// 1タイルの描画パラメータ(レイアウト計算とヒットテストで共有)。
+    private struct CardLayout {
+        let video: VaultVideo
+        let center: CGPoint
+        let size: CGSize
+        let alpha: Double
+        let tilt: Double
+        let depth: Double     // シリンダーのz(0..1)
+        let order: Double     // 描画順(小さい方が奥)
+        let t: Double         // 遷移進行(0=3D, 1=FLAT)
+    }
 
     var body: some View {
         GeometryReader { geo in
-            TimelineView(.animation(paused: isSettledFlat)) { timeline in
-                let now = timeline.date
-                let raw = rawProgress(at: now)
-                let target: Double = store.mode == .flat ? 1 : 0
-                let rotation = effectiveRotation(at: now)
-                let videos = store.videos
-                ZStack {
-                    ForEach(Array(videos.enumerated()), id: \.element.id) { index, video in
-                        card(
-                            video,
-                            index: index,
-                            count: videos.count,
-                            rotation: rotation,
-                            raw: raw,
-                            target: target,
-                            in: geo.size
-                        )
+            TimelineView(.animation(paused: isSettled)) { timeline in
+                // ThumbnailStoreの観測はbody側で読んでCanvasへ渡す(確実に再描画させる)
+                let thumbnails = ThumbnailStore.shared.images
+                let layouts = computeLayouts(at: timeline.date, in: geo.size)
+                Canvas(opaque: true, rendersAsynchronously: false) { context, size in
+                    context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(VSTheme.paper))
+                    drawWatermark(context, size: size)
+                    drawAxisLabels(context, size: size)
+                    for card in layouts.sorted(by: { $0.order < $1.order }) {
+                        draw(card, in: &context, thumbnails: thumbnails)
                     }
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .background(VSTheme.paper)
-            .background(alignment: .topLeading) { watermark }
             .contentShape(Rectangle())
+            .gesture(SpatialTapGesture().onEnded { value in
+                handleTap(at: value.location, in: geo.size)
+            })
             .gesture(dragGesture(size: geo.size))
-            .simultaneousGesture(magnifyGesture)
+            .simultaneousGesture(magnifyGesture(size: geo.size))
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { lastTouch = $0.startLocation }
+            )
+            .onLongPressGesture(minimumDuration: 0.4) {
+                handleLongPress(at: lastTouch, in: geo.size)
+            }
         }
         .clipped()
-        .onChange(of: store.mode) { _, _ in
-            // 現在の進行位置から目標モードへトゥイーンを張り直す(連打しても連続)
-            tAtStart = currentGlobalT(at: Date())
+        .onChange(of: store.mode) { _, newMode in
+            // 現在の進行位置から目標へ張り直す(連打しても連続)
+            tFrom = globalT(at: Date())
+            tTo = newMode == .flat ? 1 : 0
             transitionStart = Date()
         }
         .onAppear { rebuildFlatPositions(); prefetchPosters() }
@@ -81,121 +101,226 @@ struct SpatialCanvasView: View {
         }
     }
 
-    /// FLATに完全に落ち着いたらtickを止める(自動スピン不要・電池対策)。
-    private var isSettledFlat: Bool {
+    // MARK: - レイアウト計算(描画とヒットテストの共有ソース)
+
+    private func computeLayouts(at date: Date, in size: CGSize) -> [CardLayout] {
+        let videos = store.videos
+        guard !videos.isEmpty else { return [] }
+        let raw = rawProgress(at: date)
+        let rotation = effectiveRotation(at: date)
+        let effZoom = zoom
+        let step = 2 * .pi / Double(videos.count)
+        let panX = panOffset.width + dragPan.width
+        let panY = panOffset.height + dragPan.height
+
+        return videos.enumerated().map { index, video in
+            // --- カード固有の遷移進行(スタッガー + cineイージング) ---
+            let stagger = Double(Self.jitter(video.id, 5)) * Self.staggerMax
+            let local = min(max((raw * (Self.transitionDuration + Self.staggerMax) - stagger) / Self.transitionDuration, 0), 1)
+            let t = tFrom + (tTo - tFrom) * Self.cineEase(local)
+
+            // --- シリンダー座標(カメラドリー: 広がりもスケールもzoomに追従) ---
+            let angle = rotation + Double(index) * step
+            let z = (cos(angle) + 1) / 2
+            let cylScale = (0.45 + z * 0.82) * effZoom
+            let cylX = size.width / 2 + sin(angle) * size.width * 0.38 * effZoom
+            let cylY = size.height / 2 + (Self.jitter(video.id, 1) - 0.5) * size.height * Self.verticalSpread * effZoom
+            let cylAlpha = 0.38 + z * 0.5
+
+            // --- FLAT座標(zoom=1が既定サイズ。ピンチはカメラが寄る=世界が広がる) ---
+            let norm = flatPositions[video.id] ?? CGPoint(x: 0.5, y: 0.5)
+            let flatX = size.width / 2 + (norm.x - 0.5) * size.width * 2.3 * effZoom + panX
+            let flatY = size.height / 2 + (norm.y - 0.5) * size.height * 1.7 * effZoom + panY
+            let flatScale = 1.0 * effZoom
+
+            // --- 補間 + 散開バースト ---
+            let x = Self.lerp(cylX, flatX, t)
+            let y = Self.lerp(cylY, flatY, t)
+            let dx = x - size.width / 2
+            let dy = y - size.height / 2
+            let dist = max(sqrt(dx * dx + dy * dy), 1)
+            let wave = CGFloat(sin(t * .pi))
+            let burst = wave * (40 + Self.jitter(video.id, 6) * 24)
+            let tilt = Double(Self.jitter(video.id, 7) - 0.5) * 9 * Double(wave)
+
+            let scale = Self.lerp(cylScale, flatScale, t)
+            // 既定(zoom=1・FLAT)のタイルサイズ = スクリーンショット基準の固定値
+            let baseWidth = 84 + Self.jitter(video.id, 3) * 44
+            let portrait = Self.jitter(video.id, 2) > 0.5
+            let baseHeight = portrait ? baseWidth * 1.16 : baseWidth * 0.72
+
+            return CardLayout(
+                video: video,
+                center: CGPoint(x: x + dx / dist * burst, y: y + dy / dist * burst),
+                size: CGSize(width: baseWidth * scale, height: baseHeight * scale),
+                alpha: Self.lerp(cylAlpha, 1.0, t),
+                tilt: tilt,
+                depth: z,
+                order: Self.lerp(CGFloat(z), Self.jitter(video.id, 4), t),
+                t: t
+            )
+        }
+    }
+
+    // MARK: - 描画
+
+    private func draw(_ card: CardLayout, in context: inout GraphicsContext, thumbnails: [String: UIImage]) {
+        let w = card.size.width
+        let h = card.size.height
+        guard w > 6 else { return }
+
+        context.drawLayer { ctx in
+            ctx.opacity = card.alpha
+            ctx.translateBy(x: card.center.x, y: card.center.y)
+            if abs(card.tilt) > 0.05 {
+                ctx.rotate(by: .degrees(card.tilt))
+            }
+
+            let rect = CGRect(x: -w / 2, y: -h / 2, width: w, height: h)
+            let cardPath = Path(roundedRect: rect, cornerRadius: 2)
+
+            // 影は手前のカードだけ(Webと同じ。全カード影はGPUを食う)
+            if card.depth > 0.72 || card.t > 0.6 {
+                ctx.addFilter(.shadow(color: VSTheme.ink.opacity(0.12), radius: 4, x: 0, y: 2.5))
+            }
+            ctx.fill(cardPath, with: .color(VSTheme.paperHi))
+
+            // メディア(内側インセット + 下端のタイトル帯はWebのdrawTile準拠)
+            let inset = min(max(w * 0.06, 3), 9)
+            let strip = min(15, h * 0.2)
+            let mediaRect = CGRect(
+                x: rect.minX + inset,
+                y: rect.minY + inset,
+                width: w - inset * 2,
+                height: h - inset * 2 - strip
+            )
+            if let posterUrl = card.video.posterUrl,
+               let url = MediaURL.url(mediaPath: posterUrl),
+               let uiImage = thumbnails[url.absoluteString] {
+                ctx.drawLayer { media in
+                    media.clip(to: Path(roundedRect: mediaRect, cornerRadius: 1))
+                    // aspect-fill
+                    let iw = uiImage.size.width
+                    let ih = uiImage.size.height
+                    let fill = max(mediaRect.width / iw, mediaRect.height / ih)
+                    let drawSize = CGSize(width: iw * fill, height: ih * fill)
+                    media.draw(
+                        Image(uiImage: uiImage),
+                        in: CGRect(
+                            x: mediaRect.midX - drawSize.width / 2,
+                            y: mediaRect.midY - drawSize.height / 2,
+                            width: drawSize.width,
+                            height: drawSize.height
+                        )
+                    )
+                }
+            } else {
+                ctx.fill(Path(roundedRect: mediaRect, cornerRadius: 1), with: .color(VSTheme.paperLow))
+                var line = Path()
+                line.move(to: CGPoint(x: mediaRect.minX, y: mediaRect.minY))
+                line.addLine(to: CGPoint(x: mediaRect.maxX, y: mediaRect.maxY))
+                ctx.stroke(line, with: .color(VSTheme.line), lineWidth: 1)
+            }
+
+            // タイトル帯(手前 or FLATのみ。奥の小さいカードには描かない — Web準拠)
+            if w > 68, card.depth > 0.56 || card.t > 0.5 {
+                let title = Text(card.video.title)
+                    .font(.system(size: 9))
+                    .foregroundColor(VSTheme.ink)
+                ctx.drawLayer { text in
+                    text.clip(to: cardPath)
+                    text.draw(
+                        title,
+                        in: CGRect(
+                            x: rect.minX + inset,
+                            y: rect.maxY - strip - 1,
+                            width: w - inset * 2,
+                            height: strip
+                        )
+                    )
+                }
+            }
+
+            ctx.stroke(cardPath, with: .color(VSTheme.lineFaint), lineWidth: 1)
+        }
+    }
+
+    /// 背景の分類軸ラベル。FLATの世界座標に置くのでパン/ズームに追従し、
+    /// 地図の地名のようにカードの背後にうっすら見える。
+    private func drawAxisLabels(_ context: GraphicsContext, size: CGSize) {
+        guard !axisLabels.isEmpty else { return }
+        let panX = panOffset.width + dragPan.width
+        let panY = panOffset.height + dragPan.height
+        for item in axisLabels {
+            let x = size.width / 2 + (item.norm.x - 0.5) * size.width * 2.3 * zoom + panX
+            let y = size.height / 2 + (item.norm.y - 0.5) * size.height * 1.7 * zoom + panY
+            let text = Text(item.label.uppercased())
+                .font(.instrumentSerifItalic(26))
+                .foregroundColor(VSTheme.ink.opacity(0.11))
+            context.draw(text, at: CGPoint(x: x, y: y))
+        }
+    }
+
+    private func drawWatermark(_ context: GraphicsContext, size: CGSize) {
+        let vault = Text("VAULT").font(.instrumentSerif(110)).foregroundColor(VSTheme.watermark)
+        context.draw(vault, at: CGPoint(x: 24, y: 70), anchor: .leading)
+        let mode = Text(store.mode == .flat ? "FLAT" : "3D")
+            .font(.instrumentSerif(80))
+            .foregroundColor(VSTheme.watermark)
+        context.draw(mode, at: CGPoint(x: size.width - 24, y: size.height - 60), anchor: .trailing)
+    }
+
+    // MARK: - ヒットテスト(タップ=Wiki / 長押し=詳細)
+
+    private func hitTest(at point: CGPoint, in size: CGSize) -> VaultVideo? {
+        let layouts = computeLayouts(at: Date(), in: size)
+        // 手前(orderが大きい)から探す。3Dでは奥のカードは無効
+        for card in layouts.sorted(by: { $0.order > $1.order }) {
+            guard card.t > 0.5 || card.depth > 0.55 else { continue }
+            let rect = CGRect(
+                x: card.center.x - card.size.width / 2,
+                y: card.center.y - card.size.height / 2,
+                width: card.size.width,
+                height: card.size.height
+            )
+            if rect.insetBy(dx: -4, dy: -4).contains(point) {
+                return card.video
+            }
+        }
+        return nil
+    }
+
+    private func handleTap(at point: CGPoint, in size: CGSize) {
+        if let video = hitTest(at: point, in: size) {
+            store.send(.videoTapped(video.id))
+        }
+    }
+
+    private func handleLongPress(at point: CGPoint, in size: CGSize) {
+        if let video = hitTest(at: point, in: size) {
+            store.send(.videoDetailRequested(video.id))
+        }
+    }
+
+    // MARK: - 遷移・回転・ジェスチャ
+
+    /// 全カードが目標に到達しFLATで静止していたらtickを止める(電池対策)。
+    private var isSettled: Bool {
         guard store.mode == .flat else { return false }
         guard let start = transitionStart else { return true }
         return Date().timeIntervalSince(start) > Self.transitionDuration + Self.staggerMax
     }
 
-    // MARK: - カード
-
-    @ViewBuilder
-    private func card(
-        _ video: VaultVideo,
-        index: Int,
-        count: Int,
-        rotation: Double,
-        raw: Double,
-        target: Double,
-        in size: CGSize
-    ) -> some View {
-        let effZoom = (zoom * gestureZoom).clamped(to: Self.zoomRange)
-
-        // --- カード固有の遷移進行(スタッガー + cineイージング) ---
-        let stagger = Double(Self.jitter(video.id, 5)) * Self.staggerMax
-        let local = min(max((raw * (Self.transitionDuration + Self.staggerMax) - stagger) / Self.transitionDuration, 0), 1)
-        let eased = Self.cineEase(local)
-        let t = tAtStart + (target - tAtStart) * eased
-
-        // --- シリンダー座標(Webの配置則 + 縦ジッターを画面全域に) ---
-        let step = 2 * .pi / Double(max(count, 1))
-        let angle = rotation + Double(index) * step
-        let z = (cos(angle) + 1) / 2
-        let cylScale = (0.45 + z * 0.82) * effZoom
-        let cylX = size.width / 2 + sin(angle) * size.width * 0.38
-        let cylY = size.height / 2 + (Self.jitter(video.id, 1) - 0.5) * size.height * Self.verticalSpread
-        let cylAlpha = 0.38 + z * 0.5
-
-        // --- FLAT座標(map正規化 → 画面より広いキャンバスに展開、パン追従) ---
-        let norm = flatPositions[video.id] ?? CGPoint(x: 0.5, y: 0.5)
-        let panX = panOffset.width + dragPan.width
-        let panY = panOffset.height + dragPan.height
-        let flatX = size.width / 2 + (norm.x - 0.5) * size.width * 2.3 * effZoom + panX
-        let flatY = size.height / 2 + (norm.y - 0.5) * size.height * 1.7 * effZoom + panY
-        let flatScale = 0.95 * effZoom
-
-        // --- 補間 + 散開バースト(中間点で中心から外向きに膨らみ、わずかに傾く) ---
-        let x = Self.lerp(cylX, flatX, t)
-        let y = Self.lerp(cylY, flatY, t)
-        let dx = x - size.width / 2
-        let dy = y - size.height / 2
-        let dist = max(sqrt(dx * dx + dy * dy), 1)
-        let wave = CGFloat(sin(t * .pi))
-        let burst = wave * (40 + Self.jitter(video.id, 6) * 24)
-        let finalX = x + dx / dist * burst
-        let finalY = y + dy / dist * burst
-        let tilt = Double(Self.jitter(video.id, 7) - 0.5) * 9 * Double(wave)
-
-        let scale = Self.lerp(cylScale, flatScale, t)
-        let alpha = Self.lerp(cylAlpha, 1.0, t)
-        let zIndexValue = Self.lerp(CGFloat(z), Self.jitter(video.id, 4), t)
-
-        // カードごとのサイズジッター(Webの per-card jitter)
-        let tileWidth = 84 + Self.jitter(video.id, 3) * 44
-        let portrait = Self.jitter(video.id, 2) > 0.5
-        let tileHeight = portrait ? tileWidth * 1.16 : tileWidth * 0.72
-
-        VaultTileView(
-            video: video,
-            size: CGSize(width: tileWidth, height: tileHeight),
-            onTap: { store.send(.videoTapped(video.id)) },
-            onLongPress: { store.send(.videoDetailRequested(video.id)) }
-        )
-        .rotationEffect(.degrees(tilt))
-        .scaleEffect(scale)
-        .opacity(alpha)
-        .position(x: finalX, y: finalY)
-        .zIndex(Double(zIndexValue))
-        // 3Dでは奥のカードに触れない(誤タップ防止)。FLATは全カード可
-        .allowsHitTesting(t > 0.5 || z > 0.55)
-    }
-
-    /// 背景の "VAULT" + モード名ウォーターマーク。
-    private var watermark: some View {
-        ZStack(alignment: .topLeading) {
-            VSTheme.paper
-            Text("VAULT")
-                .font(.instrumentSerif(110))
-                .foregroundStyle(VSTheme.watermark)
-                .fixedSize()
-                .padding(.leading, 12)
-            Text(store.mode == .flat ? "FLAT" : "3D")
-                .font(.instrumentSerif(80))
-                .foregroundStyle(VSTheme.watermark)
-                .fixedSize()
-                .padding([.trailing, .bottom], 16)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-                .contentTransition(.opacity)
-        }
-        .ignoresSafeArea()
-        .allowsHitTesting(false)
-    }
-
-    // MARK: - 遷移・回転・ジェスチャ
-
-    /// 遷移の線形進行(0..1)。スタッガー分を含む全長で正規化する。
     private func rawProgress(at date: Date) -> Double {
         guard let start = transitionStart else { return 1 }
         return min(max(date.timeIntervalSince(start) / (Self.transitionDuration + Self.staggerMax), 0), 1)
     }
 
-    /// スタッガーを無視した全体代表の進行位置(モード連打時の張り直し用)。
-    private func currentGlobalT(at date: Date) -> Double {
-        let target: Double = store.mode == .flat ? 1 : 0
+    /// スタッガー抜きの代表進行位置(モード連打時の張り直し用)。
+    private func globalT(at date: Date) -> Double {
         let raw = rawProgress(at: date)
         let local = min(max(raw * (Self.transitionDuration + Self.staggerMax) / Self.transitionDuration, 0), 1)
-        return tAtStart + (target - tAtStart) * Self.cineEase(local)
+        return tFrom + (tTo - tFrom) * Self.cineEase(local)
     }
 
     /// Webの --ease-cine: cubic-bezier(0.22,1,0.36,1) 相当の強いease-out。
@@ -207,7 +332,6 @@ struct SpatialCanvasView: View {
         var rotation = baseRotation + dragDelta
         if !isDragging {
             rotation += date.timeIntervalSince(spinEpoch) * Self.spinRate
-            // フリック: v0·τ·(1-e^(-t/τ)) — すーっと減速して自動スピンに溶ける
             let dt = date.timeIntervalSince(flingEpoch)
             rotation += flingVelocity * Self.flingTau * (1 - exp(-dt / Self.flingTau))
         }
@@ -221,7 +345,6 @@ struct SpatialCanvasView: View {
                     dragPan = value.translation
                 } else {
                     if !isDragging {
-                        // スピン+モメンタム分をベースに焼き込んでからドラッグ追従へ
                         baseRotation = effectiveRotation(at: Date())
                         flingVelocity = 0
                         isDragging = true
@@ -237,7 +360,6 @@ struct SpatialCanvasView: View {
                 } else {
                     baseRotation += dragDelta
                     dragDelta = 0
-                    // 指を離した瞬間の角速度をそのまま引き継ぐ
                     flingVelocity = Double(value.velocity.width / max(size.width, 1)) * .pi * 1.4
                     flingEpoch = Date()
                     spinEpoch = Date()
@@ -246,14 +368,31 @@ struct SpatialCanvasView: View {
             }
     }
 
-    private var magnifyGesture: some Gesture {
+    /// カメラ型ズーム: ピンチ位置を不動点に世界がスケールする(FLAT)。
+    /// 3Dはドリーイン(広がりとスケールが同時に迫る)。
+    private func magnifyGesture(size: CGSize) -> some Gesture {
         MagnifyGesture()
             .onChanged { value in
-                gestureZoom = value.magnification
+                if pinchAnchor == nil {
+                    pinchAnchor = value.startLocation
+                    pinchStartZoom = zoom
+                    pinchStartPan = panOffset
+                }
+                let newZoom = (pinchStartZoom * value.magnification).clamped(to: Self.zoomRange)
+                zoom = newZoom
+                if store.mode == .flat, let anchor = pinchAnchor {
+                    // p = C + w·zoom + pan の不動点解: pan' = (a−C) − (a−C−pan₀)·(zoom'/zoom₀)
+                    let ax = anchor.x - size.width / 2
+                    let ay = anchor.y - size.height / 2
+                    let ratio = newZoom / max(pinchStartZoom, 0.001)
+                    panOffset = CGSize(
+                        width: ax - (ax - pinchStartPan.width) * ratio,
+                        height: ay - (ay - pinchStartPan.height) * ratio
+                    )
+                }
             }
-            .onEnded { value in
-                zoom = (zoom * value.magnification).clamped(to: Self.zoomRange)
-                gestureZoom = 1
+            .onEnded { _ in
+                pinchAnchor = nil
             }
     }
 
@@ -266,7 +405,6 @@ struct SpatialCanvasView: View {
         ThumbnailStore.shared.prefetch(urls)
     }
 
-    /// video.map のmin/maxを0..1に正規化(FLATレイアウトの元座標)。
     private func rebuildFlatPositions() {
         var raw: [String: VaultPoint] = [:]
         for video in store.videos {
@@ -290,6 +428,41 @@ struct SpatialCanvasView: View {
             )
         }
         flatPositions = result
+        rebuildAxisLabels()
+    }
+
+    /// 分類軸ラベルを組み立てる(見た目だけのモック)。
+    /// videoTypeLabel のクラスタ重心に置くと「なんとなく分類されている」ように見える。
+    /// タイプが乏しいときは定番ワードを固定配置で足す。
+    private func rebuildAxisLabels() {
+        var clusters: [String: [CGPoint]] = [:]
+        for video in store.videos {
+            guard let type = video.videoTypeLabel, !type.isEmpty,
+                  let norm = flatPositions[video.id] else { continue }
+            clusters[type, default: []].append(norm)
+        }
+        var labels: [(label: String, norm: CGPoint)] = clusters
+            .filter { $0.value.count >= 3 }
+            .map { label, points in
+                let cx = points.map(\.x).reduce(0, +) / CGFloat(points.count)
+                let cy = points.map(\.y).reduce(0, +) / CGFloat(points.count)
+                return (label, CGPoint(x: cx, y: cy))
+            }
+            .sorted { $0.label < $1.label }
+        labels = Array(labels.prefix(8))
+
+        let mocks: [(String, CGPoint)] = [
+            ("Vlog", CGPoint(x: 0.16, y: 0.22)),
+            ("Launch Video", CGPoint(x: 0.78, y: 0.28)),
+            ("Self Storytelling", CGPoint(x: 0.26, y: 0.78)),
+            ("Brand Film", CGPoint(x: 0.82, y: 0.74)),
+        ]
+        for mock in mocks where labels.count < 4 {
+            if !labels.contains(where: { $0.label.caseInsensitiveCompare(mock.0) == .orderedSame }) {
+                labels.append(mock)
+            }
+        }
+        axisLabels = labels
     }
 
     private static func lerp(_ a: CGFloat, _ b: CGFloat, _ t: Double) -> CGFloat {
