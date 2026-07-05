@@ -20,10 +20,12 @@ struct SpatialCanvasView: View {
     // フリックの指数減衰モメンタム(τ秒で減衰し自動スピンに溶ける)
     @State private var flingVelocity: Double = 0
     @State private var flingEpoch = Date()
-    // カメラ(共通ズーム / FLATパン)
+    // カメラ(共通ズーム / FLATパン / 3Dの上下トラック)
     @State private var zoom: CGFloat = 1
     @State private var panOffset: CGSize = .zero
     @State private var dragPan: CGSize = .zero
+    @State private var cylPanY: CGFloat = 0
+    @State private var dragCylPanY: CGFloat = 0
     // ピンチ中の基準値(ピンチ位置を不動点にするための開始スナップショット)
     @State private var pinchAnchor: CGPoint?
     @State private var pinchStartZoom: CGFloat = 1
@@ -44,7 +46,10 @@ struct SpatialCanvasView: View {
     private static let zoomRange: ClosedRange<CGFloat> = 0.5...3.0
     private static let transitionDuration: Double = 0.85
     private static let staggerMax: Double = 0.22
-    private static let verticalSpread: CGFloat = 0.78
+    private static let verticalSpread: CGFloat = 1.1
+    /// シリンダーの横の広がり(画面幅比)と縮小率。重なりを減らすため広く・小さく
+    private static let cylinderSpreadX: CGFloat = 0.46
+    private static let cylinderScaleFactor: CGFloat = 0.8
     /// FLATの世界の広がり(画面比)。タイルを小さく+広がりを増やして重なりを減らす
     private static let flatSpreadX: CGFloat = 2.6
     private static let flatSpreadY: CGFloat = 2.0
@@ -132,10 +137,13 @@ struct SpatialCanvasView: View {
             // --- シリンダー座標(カメラドリー: 広がりもスケールもzoomに追従) ---
             let angle = rotation + Double(index) * step
             let z = (cos(angle) + 1) / 2
-            let cylScale = (0.45 + z * 0.82) * effZoom
-            let cylX = size.width / 2 + sin(angle) * size.width * 0.38 * effZoom
-            let cylY = size.height / 2 + (Self.jitter(video.id, 1) - 0.5) * size.height * Self.verticalSpread * effZoom
-            let cylAlpha = 0.38 + z * 0.5
+            let cylScale = (0.45 + z * 0.82) * Self.cylinderScaleFactor * effZoom
+            let cylX = size.width / 2 + sin(angle) * size.width * Self.cylinderSpreadX * effZoom
+            let cylY = size.height / 2
+                + (Self.jitter(video.id, 1) - 0.5) * size.height * Self.verticalSpread * effZoom
+                + cylPanY + dragCylPanY
+            // 奥は薄く沈めて手前を際立たせる(密集の視覚ノイズを下げる)
+            let cylAlpha = 0.22 + z * 0.78
 
             // --- FLAT座標(zoom=1が既定サイズ。ピンチはカメラが寄る=世界が広がる) ---
             let norm = flatPositions[video.id] ?? CGPoint(x: 0.5, y: 0.5)
@@ -356,7 +364,9 @@ struct SpatialCanvasView: View {
                         flingVelocity = 0
                         isDragging = true
                     }
+                    // 横 = 回転 / 縦 = 上下トラック(カメラの高さ移動)
                     dragDelta = Double(value.translation.width / max(size.width, 1)) * .pi * 1.4
+                    dragCylPanY = value.translation.height
                 }
             }
             .onEnded { value in
@@ -367,6 +377,8 @@ struct SpatialCanvasView: View {
                 } else {
                     baseRotation += dragDelta
                     dragDelta = 0
+                    cylPanY += value.translation.height
+                    dragCylPanY = 0
                     flingVelocity = Double(value.velocity.width / max(size.width, 1)) * .pi * 1.4
                     flingEpoch = Date()
                     spinEpoch = Date()
