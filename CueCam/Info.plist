@@ -25,8 +25,12 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSCameraUsageDescription</key>
+	<string>CueCam uses the camera to record video for each scripted shot on the storyboard.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Local network access is used to load vault data from the local servers on your Mac.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>CueCam uses the microphone to record audio while filming.</string>
 	<key>UIAppFonts</key>
 	<array>
 		<string>InstrumentSerif-Regular.ttf</string>
@@ -37,6 +41,8 @@
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
 	</array>
 </dict>
 </plist>

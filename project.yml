@@ -30,12 +30,17 @@ targets:
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
         NSLocalNetworkUsageDescription: Local network access is used to load vault data from the local servers on your Mac.
+        NSCameraUsageDescription: CueCam uses the camera to record video for each scripted shot on the storyboard.
+        NSMicrophoneUsageDescription: CueCam uses the microphone to record audio while filming.
         UIAppFonts:
           - InstrumentSerif-Regular.ttf
           - InstrumentSerif-Italic.ttf
         UILaunchScreen: {}
+        # 横向きは撮影画面専用。他画面は OrientationLockDelegate が縦に固定する (ADR-004)
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeRight
+          - UIInterfaceOrientationLandscapeLeft
   # ShootFeature(スクリプト付き撮影フロー)を単体で実機起動するための開発用シェル。
   # CueCam本体への統合方針決定後に削除予定 (ADR-003)
   ShootCam:

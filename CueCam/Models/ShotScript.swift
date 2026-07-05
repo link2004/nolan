@@ -1,18 +1,38 @@
 import Foundation
 
-/// AIディレクターが出す1カット分の撮影指示スクリプト
+/// 1カット分の撮影指示スクリプト
 struct ShotScript: Equatable, Identifiable, Sendable {
-    let id: Int
+    let id: String
+    /// ボード由来のスレート表記("B1 · 03")。モックスクリプトでは nil
+    let slate: String?
+    /// メインの撮影指示
     let text: String
+    /// 補足のショット指示(text が script のときの shot_direction)
+    let direction: String?
+    let techniques: [String]
+
+    init(
+        id: String,
+        slate: String? = nil,
+        text: String,
+        direction: String? = nil,
+        techniques: [String] = []
+    ) {
+        self.id = id
+        self.slate = slate
+        self.text = text
+        self.direction = direction
+        self.techniques = techniques
+    }
 }
 
 extension [ShotScript] {
-    // TODO: DirectorClient(Claude API)による動的生成に置き換える
+    // TODO: ShootCam 単体起動用の固定モック(本体は SBBoard.shotScripts を使う)
     static let mock: Self = [
-        ShotScript(id: 1, text: "お店の外観を正面から、3秒かけてゆっくり撮ってください"),
-        ShotScript(id: 2, text: "入口のドアを開けて中に入るシーンを撮ってください"),
-        ShotScript(id: 3, text: "店内を左から右へゆっくりパンして全体の雰囲気を撮ってください"),
-        ShotScript(id: 4, text: "注文したドリンクを手元のアップで撮ってください"),
-        ShotScript(id: 5, text: "窓際の席から外の景色と店内が両方入るように撮ってください"),
+        ShotScript(id: "mock-1", text: "Film the storefront from the front, panning slowly for about 3 seconds"),
+        ShotScript(id: "mock-2", text: "Film yourself opening the door and walking inside"),
+        ShotScript(id: "mock-3", text: "Slowly pan from left to right to capture the atmosphere of the interior"),
+        ShotScript(id: "mock-4", text: "Film a close-up of the drink you ordered"),
+        ShotScript(id: "mock-5", text: "From a window seat, frame both the view outside and the interior"),
     ]
 }

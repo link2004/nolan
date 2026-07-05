@@ -4,6 +4,9 @@ import SwiftUI
 
 @main
 struct CueCamApp: App {
+    // 通常は縦固定、撮影画面(ShootView)表示中のみ横向きにする (ADR-004)
+    @UIApplicationDelegateAdaptor(OrientationLockDelegate.self) private var orientationDelegate
+
     static let store = Store(initialState: AppReducer.State()) {
         AppReducer()
     }

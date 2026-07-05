@@ -35,9 +35,39 @@ struct ShootView: View {
             case .finished:
                 finishedView
             }
+
+            if store.showsClose, store.phase != .recording {
+                closeButton
+            }
         }
         .statusBarHidden()
-        .onAppear { store.send(.onAppear) }
+        .onAppear {
+            OrientationLock.lock(.landscape)
+            store.send(.onAppear)
+        }
+        .onDisappear {
+            OrientationLock.lock(.portrait)
+        }
+    }
+
+    private var closeButton: some View {
+        VStack {
+            HStack {
+                Button {
+                    store.send(.closeButtonTapped)
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 36, height: 36)
+                        .background(.black.opacity(0.5), in: Circle())
+                }
+                .buttonStyle(.plain)
+                Spacer()
+            }
+            Spacer()
+        }
+        .padding(16)
     }
 
     // MARK: - 撮影中オーバーレイ
@@ -45,7 +75,7 @@ struct ShootView: View {
     private var shootingOverlay: some View {
         ZStack {
             if store.session == nil {
-                Text("カメラを利用できません(実機で実行してください)")
+                Text("Camera unavailable (run on a physical device)")
                     .font(.callout)
                     .foregroundStyle(.white.opacity(0.6))
             }
@@ -82,19 +112,48 @@ struct ShootView: View {
     }
 
     private var scriptBar: some View {
-        HStack(spacing: 12) {
-            Text("\(store.currentIndex + 1)/\(store.scripts.count)")
-                .font(.footnote.bold().monospacedDigit())
-                .foregroundStyle(.black)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
-                .background(AppColor.accent, in: Capsule())
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
+                Text("\(store.currentIndex + 1)/\(store.scripts.count)")
+                    .font(.footnote.bold().monospacedDigit())
+                    .foregroundStyle(.black)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(AppColor.accent, in: Capsule())
+
+                if let slate = store.currentScript?.slate {
+                    Text(slate)
+                        .font(.system(size: 11, design: .monospaced))
+                        .tracking(1)
+                        .foregroundStyle(.white.opacity(0.6))
+                }
+
+                ForEach(store.currentScript?.techniques ?? [], id: \.self) { technique in
+                    ShootTechniqueChip(text: technique)
+                }
+
+                Spacer(minLength: 0)
+
+                if !store.title.isEmpty {
+                    Text(store.title)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.white.opacity(0.45))
+                        .lineLimit(1)
+                }
+            }
 
             Text(store.currentScript?.text ?? "")
                 .font(.body.weight(.medium))
                 .foregroundStyle(.white)
                 .lineLimit(2)
                 .minimumScaleFactor(0.8)
+
+            if let direction = store.currentScript?.direction {
+                Text(direction)
+                    .font(.footnote)
+                    .foregroundStyle(.white.opacity(0.75))
+                    .lineLimit(2)
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
@@ -142,10 +201,10 @@ struct ShootView: View {
                         .lineLimit(2)
                         .minimumScaleFactor(0.8)
                     Spacer()
-                    Button("撮り直す") { store.send(.retakeTapped) }
+                    Button("Retake") { store.send(.retakeTapped) }
                         .buttonStyle(.bordered)
                         .tint(.white)
-                    Button("OK 次へ") { store.send(.okTapped) }
+                    Button("OK, Next") { store.send(.okTapped) }
                         .buttonStyle(.borderedProminent)
                         .tint(AppColor.accent)
                 }
@@ -165,12 +224,19 @@ struct ShootView: View {
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 48))
                 .foregroundStyle(AppColor.accent)
-            Text("全\(store.scripts.count)カットの撮影が完了しました")
+            Text("All \(store.scripts.count) shots complete!")
                 .font(.title3.bold())
                 .foregroundStyle(.white)
-            Button("最初から撮る") { store.send(.restartTapped) }
-                .buttonStyle(.bordered)
-                .tint(.white)
+            HStack(spacing: 12) {
+                Button("Start Over") { store.send(.restartTapped) }
+                    .buttonStyle(.bordered)
+                    .tint(.white)
+                if store.showsClose {
+                    Button("Done") { store.send(.closeButtonTapped) }
+                        .buttonStyle(.borderedProminent)
+                        .tint(AppColor.accent)
+                }
+            }
         }
     }
 
@@ -179,9 +245,9 @@ struct ShootView: View {
             Image(systemName: "video.slash.fill")
                 .font(.largeTitle)
                 .foregroundStyle(.white.opacity(0.7))
-            Text("撮影にはカメラとマイクの許可が必要です")
+            Text("Camera and microphone access is required to shoot")
                 .foregroundStyle(.white)
-            Button("設定を開く") {
+            Button("Open Settings") {
                 if let url = URL(string: UIApplication.openSettingsURLString) {
                     openURL(url)
                 }
@@ -189,6 +255,25 @@ struct ShootView: View {
             .buttonStyle(.borderedProminent)
             .tint(AppColor.accent)
         }
+    }
+}
+
+/// techniqueチップ。StoryboardFeature の TechniqueTag と同意匠だが、
+/// ShootCam ターゲットに StoryboardFeature を含めないためローカル定義
+struct ShootTechniqueChip: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 10))
+            .tracking(1)
+            .textCase(.uppercase)
+            .foregroundStyle(.white.opacity(0.7))
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4)
+            .overlay {
+                Capsule().strokeBorder(.white.opacity(0.25), lineWidth: 1)
+            }
     }
 }
 

@@ -56,7 +56,21 @@ xcodebuild -project CueCam.xcodeproj -scheme CueCam \
 - プロジェクトファイルは XcodeGen 管理。`project.yml` が唯一のソース(`.xcodeproj` はgit管理外)
 - Bundle ID: `com.cuecam.app` / iOS 18.0+ / Team: 7LF5Z5CUCR
 
+## 撮影ワークフロー: Storyboard → Shoot(ShootFeature)
+
+ボード画面のツールバー「Shoot」から、そのボードの beats/lines を撮影スクリプトにした横持ち撮影フローに入れる(ADR-003/004参照)。
+
+- フロー: Storyboard タブ → プロジェクト → ボード → Shoot → 横向きに切替 → スクリプトを1カットずつ 録画→プレビュー→OK/Retake → 完了 → Done で縦に復帰
+- スクリプト生成: `SBBoard.shotScripts`(`Models/SBBoard+ShotScripts.swift`)が全ラインを平坦化。AI生成ではなくボードの `script`/`shot_direction` 直接マッピング
+- コード: `Features/ShootFeature/`(状態機械+横持ちUI+OrientationLock)、`Clients/CameraClient.swift`、`Models/ShotScript.swift`
+- 横向き制御: Info.plist は縦+横を宣言し、`OrientationLockDelegate`(既定 .portrait)を ShootView 表示中のみ .landscape に切替
+- 開発用シェルターゲット **ShootCam**(`com.cuecam.shootcam`、横固定): ShootFeature 単体をモックスクリプトで実機起動できる。`Models/SBBoard+ShotScripts.swift` と StoryboardFeature は含まない
+- 一時実装: 承認テイクは一時ディレクトリ保持のみで書き出し・ボード紐付け未実装
+- 実機ビルド: `bash ~/.claude/skills/ios-device-build/scripts/device_build.sh . CueCam`(ShootCam スキームはスクリプトが .app を見つけられないため DerivedData/CueCam-*/Build/Products/Debug-iphoneos/ShootCam.app を devicectl で手動インストール)
+
 ## 設計決定
 
 - ADR-001: TCA + XcodeGen によるプロジェクト構成(`docs/decisions/001-tca-xcodegen.md`)
 - ADR-002: Ten-K Vault 読み取り専用クライアントへのピボット(`docs/decisions/ADR-002-ten-k-vault-client-pivot.md`)
+- ADR-003: スクリプト付き撮影フローと ShootCam 起動ターゲット(`docs/decisions/003-shootcam-script-camera.md`)
+- ADR-004: Storyboard → 撮影ワークフロー統合(`docs/decisions/004-storyboard-to-shoot.md`)

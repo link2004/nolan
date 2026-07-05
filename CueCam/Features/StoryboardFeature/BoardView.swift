@@ -2,7 +2,7 @@ import ComposableArchitecture
 import SwiftUI
 
 struct BoardView: View {
-    let store: StoreOf<BoardFeature>
+    @Bindable var store: StoreOf<BoardFeature>
 
     /// フルスクリーン再生中のクリップ参照(ビューローカルな一時状態なのでStateに持たない)。
     @State private var selected: SBReference?
@@ -15,11 +15,26 @@ struct BoardView: View {
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbarColorScheme(.dark, for: .navigationBar)
             .preferredColorScheme(.dark)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        store.send(.shootButtonTapped)
+                    } label: {
+                        Label("Shoot", systemImage: "video.fill")
+                    }
+                    .disabled(store.board == nil)
+                }
+            }
             .task { store.send(.task) }
             .fullScreenCover(item: $selected) { reference in
                 if let url = MediaURL.url(key: reference.path) {
                     FullscreenClipView(url: url, reference: reference)
                 }
+            }
+            .fullScreenCover(
+                item: $store.scope(state: \.shoot, action: \.shoot)
+            ) { shootStore in
+                ShootView(store: shootStore)
             }
     }
 

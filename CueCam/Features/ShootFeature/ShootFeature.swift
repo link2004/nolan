@@ -10,11 +10,15 @@ struct ShootFeature {
     @ObservableState
     struct State: Equatable {
         var scripts: [ShotScript]
+        /// 撮影対象の名前(ボードのタイトル等)。空なら非表示
+        var title = ""
+        /// 親からpresentされている場合true(閉じるボタン/Doneを出す)
+        var showsClose = false
         var currentIndex = 0
         var phase: Phase = .preparing
         var session: CameraSession?
         /// OK済みテイク(script.id → 動画URL)。書き出し機能で使う予定
-        var approvedTakes: [Int: URL] = [:]
+        var approvedTakes: [String: URL] = [:]
 
         var currentScript: ShotScript? {
             scripts.indices.contains(currentIndex) ? scripts[currentIndex] : nil
@@ -39,6 +43,12 @@ struct ShootFeature {
         case retakeTapped
         case okTapped
         case restartTapped
+        case closeButtonTapped
+        case delegate(Delegate)
+
+        enum Delegate {
+            case close
+        }
     }
 
     var body: some ReducerOf<Self> {
@@ -119,6 +129,12 @@ struct ShootFeature {
                         try? FileManager.default.removeItem(at: url)
                     }
                 }
+
+            case .closeButtonTapped:
+                return .send(.delegate(.close))
+
+            case .delegate:
+                return .none
             }
         }
     }
