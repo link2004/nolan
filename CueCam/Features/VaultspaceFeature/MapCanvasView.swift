@@ -55,12 +55,8 @@ struct VaultspaceView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(VSTheme.paper)
         case .loaded:
-            switch store.mode {
-            case .cylinder:
-                CylinderCanvasView(store: store)
-            case .flat:
-                MapCanvasView(store: store)
-            }
+            // 3D/FLATは統合キャンバスが1枚で描き、切替時はモーフィングで遷移する
+            SpatialCanvasView(store: store)
         }
     }
 
@@ -69,123 +65,6 @@ struct VaultspaceView: View {
             .font(.instrumentSerif(22))
             .foregroundStyle(VSTheme.ink.opacity(store.mode == mode ? 0.92 : 0.32))
             .onTapGesture { store.send(.binding(.set(\.mode, mode))) }
-    }
-}
-
-/// 2Dマップ本体。map座標を正規化して仮想キャンバスに配置し、ピンチでズームする。
-struct MapCanvasView: View {
-    @Bindable var store: StoreOf<VaultspaceFeature>
-
-    /// ピンチ中の一時倍率。確定時に store.zoom に畳み込む。
-    @State private var gestureZoom: CGFloat = 1
-
-    private static let canvasSize: CGFloat = 3000
-    private static let padding: CGFloat = 200
-    /// Webの drawTile 相当: カード全体 120×100(上部にメディア、下部に~15ptのタイトル帯)
-    private static let tileSize = CGSize(width: 120, height: 100)
-    private static let titleStripHeight: CGFloat = 15
-    private static let mediaInset: CGFloat = 6
-    private static let zoomRange: ClosedRange<CGFloat> = 0.4...3.0
-
-    var body: some View {
-        let zoom = effectiveZoom
-        let side = Self.canvasSize * zoom
-        let positions = normalizedPositions()
-
-        ScrollView([.horizontal, .vertical]) {
-            ZStack {
-                ForEach(store.videos) { video in
-                    if let point = positions[video.id] {
-                        thumbnail(for: video)
-                            .position(x: point.x * zoom, y: point.y * zoom)
-                    }
-                }
-            }
-            .frame(width: side, height: side)
-        }
-        .defaultScrollAnchor(.center)
-        .background(VSTheme.paper)
-        // Web版の巨大ウォーターマーク。可視領域に固定で敷く(キャンバスと一緒にスクロールしない)
-        .background(alignment: .topLeading) {
-            watermark
-        }
-        .gesture(magnifyGesture)
-    }
-
-    /// 背景の "VAULT" / "FLAT" ウォーターマーク。
-    private var watermark: some View {
-        ZStack(alignment: .topLeading) {
-            VSTheme.paper
-            Text("VAULT")
-                .font(.instrumentSerif(110))
-                .foregroundStyle(VSTheme.watermark)
-                .fixedSize()
-                .padding(.leading, 12)
-            Text("FLAT")
-                .font(.instrumentSerif(80))
-                .foregroundStyle(VSTheme.watermark)
-                .fixedSize()
-                .padding([.trailing, .bottom], 16)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-        }
-        .ignoresSafeArea()
-        .allowsHitTesting(false)
-    }
-
-    private var effectiveZoom: CGFloat {
-        (store.zoom * gestureZoom).clamped(to: Self.zoomRange)
-    }
-
-    private var magnifyGesture: some Gesture {
-        MagnifyGesture()
-            .onChanged { value in
-                gestureZoom = value.magnification
-            }
-            .onEnded { value in
-                // 確定倍率をclampして保存。キャンバス全体をスケールするので
-                // アンカー中央のScrollViewが位置を自然に追従する
-                store.zoom = (store.zoom * value.magnification).clamped(to: Self.zoomRange)
-                gestureZoom = 1
-            }
-    }
-
-    /// タップ = Wikiノートへ / 長押し = クリップ・スチルの詳細シート
-    private func thumbnail(for video: VaultVideo) -> some View {
-        VaultTileView(
-            video: video,
-            size: Self.tileSize,
-            onTap: { store.send(.videoTapped(video.id)) },
-            onLongPress: { store.send(.videoDetailRequested(video.id)) }
-        )
-    }
-
-    /// space.positions(なければvideo.map)のmin/maxを取り、パディング込みの
-    /// 3000ptキャンバス座標へ正規化する。
-    private func normalizedPositions() -> [String: CGPoint] {
-        var raw: [String: VaultPoint] = [:]
-        for video in store.videos {
-            if let point = video.map {
-                raw[video.id] = point
-            }
-        }
-        guard !raw.isEmpty else { return [:] }
-
-        let xs = raw.values.map(\.x)
-        let ys = raw.values.map(\.y)
-        let minX = xs.min()!, maxX = xs.max()!
-        let minY = ys.min()!, maxY = ys.max()!
-        let spanX = max(maxX - minX, .ulpOfOne)
-        let spanY = max(maxY - minY, .ulpOfOne)
-        let usable = Self.canvasSize - Self.padding * 2
-
-        var result: [String: CGPoint] = [:]
-        for (id, point) in raw {
-            result[id] = CGPoint(
-                x: Self.padding + CGFloat((point.x - minX) / spanX) * usable,
-                y: Self.padding + CGFloat((point.y - minY) / spanY) * usable
-            )
-        }
-        return result
     }
 }
 
