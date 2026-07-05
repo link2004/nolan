@@ -117,11 +117,20 @@ struct VaultTileView: View {
     private var media: some View {
         if let posterUrl = video.posterUrl,
            let url = MediaURL.url(mediaPath: posterUrl) {
-            AsyncImage(url: url) { image in
-                image.resizable().aspectRatio(contentMode: .fill)
-            } placeholder: {
+            // ダウンサンプル済みキャッシュから即描画。未取得ならリクエストして
+            // 完了時にふわっとフェードイン(AsyncImageのフルデコードは使わない)
+            let thumbnail = ThumbnailStore.shared.image(for: url)
+            ZStack {
                 VSTheme.paperLow
+                if let thumbnail {
+                    Image(uiImage: thumbnail)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .transition(.opacity)
+                }
             }
+            .animation(.easeOut(duration: 0.28), value: thumbnail != nil)
+            .onAppear { ThumbnailStore.shared.request(url) }
         } else {
             // ポスターなし: paperLowに斜線1本 + タイプ名(Webのプレースホルダー)
             VSTheme.paperLow

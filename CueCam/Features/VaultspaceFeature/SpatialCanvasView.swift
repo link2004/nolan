@@ -2,11 +2,12 @@ import ComposableArchitecture
 import SwiftUI
 
 /// 3D(シリンダー)と FLAT(2Dマップ)を1枚のキャンバスで描く統合ビュー。
-/// 各カードの位置・スケール・透明度をシリンダー座標とマップ座標の間で補間するので、
-/// モード切替時は回転する円筒が散開(バースト)してマップへ整列するモーフィングになる。
+/// 各カードの位置・スケール・透明度をシリンダー座標とマップ座標の間で補間し、
+/// モード切替はカードごとに時間差をつけた散開(スタッガー)モーフィングで遷移する。
 ///
 /// シリンダーはWebと同じ配置則: z=(cos+1)/2, scale=0.45+z*0.82, alpha=0.38+z*0.5,
-/// 自動スピン0.052rad/s。3Dは横ドラッグ=回転、FLATはドラッグ=パン。ピンチは共通ズーム。
+/// 自動スピン0.052rad/s。3Dは横ドラッグ=回転(指数減衰モメンタム)、FLATはドラッグ=パン。
+/// ピンチは共通ズーム。描画はProMotionのフルリフレッシュレート。
 struct SpatialCanvasView: View {
     @Bindable var store: StoreOf<VaultspaceFeature>
 
@@ -15,28 +16,36 @@ struct SpatialCanvasView: View {
     @State private var dragDelta: Double = 0
     @State private var isDragging = false
     @State private var spinEpoch = Date()
+    // フリックの指数減衰モメンタム(rad/s、τ秒で減衰し自動スピンに溶ける)
+    @State private var flingVelocity: Double = 0
+    @State private var flingEpoch = Date()
     // 共通ズーム / FLATパン
     @State private var zoom: CGFloat = 1
     @State private var gestureZoom: CGFloat = 1
     @State private var panOffset: CGSize = .zero
     @State private var dragPan: CGSize = .zero
-    // モード遷移の進行(0=3D, 1=FLAT)。TimelineViewのtickで自前トゥイーンする
+    // モード遷移(0=3D, 1=FLAT)。TimelineViewのtickで自前トゥイーン
     @State private var transitionStart: Date?
     @State private var tAtStart: Double = 0
+    // FLAT座標はビデオ一覧が変わった時だけ正規化し直す(毎フレーム計算しない)
+    @State private var flatPositions: [String: CGPoint] = [:]
 
     private static let spinRate = 0.052                     // rad/s (Webと同値)
+    private static let flingTau = 0.85                      // モメンタム減衰の時定数(s)
     private static let zoomRange: ClosedRange<CGFloat> = 0.5...2.6
-    private static let transitionDuration: Double = 0.72
-    /// 縦方向の散らばり(画面高さに対する比)。中央に固まらないよう上下いっぱいに使う
+    private static let transitionDuration: Double = 0.85
+    /// カードごとの出発遅延の最大値。全体が一斉に動かず波のように散開する
+    private static let staggerMax: Double = 0.22
+    /// 縦方向の散らばり(画面高さに対する比)
     private static let verticalSpread: CGFloat = 0.78
 
     var body: some View {
         GeometryReader { geo in
-            TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: isSettledFlat)) { timeline in
+            TimelineView(.animation(paused: isSettledFlat)) { timeline in
                 let now = timeline.date
-                let t = progress(at: now)
+                let raw = rawProgress(at: now)
+                let target: Double = store.mode == .flat ? 1 : 0
                 let rotation = effectiveRotation(at: now)
-                let flat = flatNormalizedPositions()
                 let videos = store.videos
                 ZStack {
                     ForEach(Array(videos.enumerated()), id: \.element.id) { index, video in
@@ -45,8 +54,8 @@ struct SpatialCanvasView: View {
                             index: index,
                             count: videos.count,
                             rotation: rotation,
-                            t: t,
-                            flatNorm: flat[video.id],
+                            raw: raw,
+                            target: target,
                             in: geo.size
                         )
                     }
@@ -62,8 +71,13 @@ struct SpatialCanvasView: View {
         .clipped()
         .onChange(of: store.mode) { _, _ in
             // 現在の進行位置から目標モードへトゥイーンを張り直す(連打しても連続)
-            tAtStart = progress(at: Date())
+            tAtStart = currentGlobalT(at: Date())
             transitionStart = Date()
+        }
+        .onAppear { rebuildFlatPositions(); prefetchPosters() }
+        .onChange(of: store.videos) { _, _ in
+            rebuildFlatPositions()
+            prefetchPosters()
         }
     }
 
@@ -71,7 +85,7 @@ struct SpatialCanvasView: View {
     private var isSettledFlat: Bool {
         guard store.mode == .flat else { return false }
         guard let start = transitionStart else { return true }
-        return Date().timeIntervalSince(start) > Self.transitionDuration
+        return Date().timeIntervalSince(start) > Self.transitionDuration + Self.staggerMax
     }
 
     // MARK: - カード
@@ -82,11 +96,17 @@ struct SpatialCanvasView: View {
         index: Int,
         count: Int,
         rotation: Double,
-        t: Double,
-        flatNorm: CGPoint?,
+        raw: Double,
+        target: Double,
         in size: CGSize
     ) -> some View {
         let effZoom = (zoom * gestureZoom).clamped(to: Self.zoomRange)
+
+        // --- カード固有の遷移進行(スタッガー + cineイージング) ---
+        let stagger = Double(Self.jitter(video.id, 5)) * Self.staggerMax
+        let local = min(max((raw * (Self.transitionDuration + Self.staggerMax) - stagger) / Self.transitionDuration, 0), 1)
+        let eased = Self.cineEase(local)
+        let t = tAtStart + (target - tAtStart) * eased
 
         // --- シリンダー座標(Webの配置則 + 縦ジッターを画面全域に) ---
         let step = 2 * .pi / Double(max(count, 1))
@@ -98,22 +118,24 @@ struct SpatialCanvasView: View {
         let cylAlpha = 0.38 + z * 0.5
 
         // --- FLAT座標(map正規化 → 画面より広いキャンバスに展開、パン追従) ---
-        let norm = flatNorm ?? CGPoint(x: 0.5, y: 0.5)
+        let norm = flatPositions[video.id] ?? CGPoint(x: 0.5, y: 0.5)
         let panX = panOffset.width + dragPan.width
         let panY = panOffset.height + dragPan.height
         let flatX = size.width / 2 + (norm.x - 0.5) * size.width * 2.3 * effZoom + panX
         let flatY = size.height / 2 + (norm.y - 0.5) * size.height * 1.7 * effZoom + panY
         let flatScale = 0.95 * effZoom
 
-        // --- 補間 + 散開バースト(遷移中点で中心から外向きに膨らむ) ---
+        // --- 補間 + 散開バースト(中間点で中心から外向きに膨らみ、わずかに傾く) ---
         let x = Self.lerp(cylX, flatX, t)
         let y = Self.lerp(cylY, flatY, t)
         let dx = x - size.width / 2
         let dy = y - size.height / 2
         let dist = max(sqrt(dx * dx + dy * dy), 1)
-        let burst = CGFloat(sin(t * .pi)) * 70
+        let wave = CGFloat(sin(t * .pi))
+        let burst = wave * (40 + Self.jitter(video.id, 6) * 24)
         let finalX = x + dx / dist * burst
         let finalY = y + dy / dist * burst
+        let tilt = Double(Self.jitter(video.id, 7) - 0.5) * 9 * Double(wave)
 
         let scale = Self.lerp(cylScale, flatScale, t)
         let alpha = Self.lerp(cylAlpha, 1.0, t)
@@ -130,6 +152,7 @@ struct SpatialCanvasView: View {
             onTap: { store.send(.videoTapped(video.id)) },
             onLongPress: { store.send(.videoDetailRequested(video.id)) }
         )
+        .rotationEffect(.degrees(tilt))
         .scaleEffect(scale)
         .opacity(alpha)
         .position(x: finalX, y: finalY)
@@ -153,6 +176,7 @@ struct SpatialCanvasView: View {
                 .fixedSize()
                 .padding([.trailing, .bottom], 16)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                .contentTransition(.opacity)
         }
         .ignoresSafeArea()
         .allowsHitTesting(false)
@@ -160,19 +184,32 @@ struct SpatialCanvasView: View {
 
     // MARK: - 遷移・回転・ジェスチャ
 
-    /// モード遷移の進行(0=3D→1=FLAT)。easeInOutCubicで自前トゥイーン。
-    private func progress(at date: Date) -> Double {
+    /// 遷移の線形進行(0..1)。スタッガー分を含む全長で正規化する。
+    private func rawProgress(at date: Date) -> Double {
+        guard let start = transitionStart else { return 1 }
+        return min(max(date.timeIntervalSince(start) / (Self.transitionDuration + Self.staggerMax), 0), 1)
+    }
+
+    /// スタッガーを無視した全体代表の進行位置(モード連打時の張り直し用)。
+    private func currentGlobalT(at date: Date) -> Double {
         let target: Double = store.mode == .flat ? 1 : 0
-        guard let start = transitionStart else { return target }
-        let raw = min(max(date.timeIntervalSince(start) / Self.transitionDuration, 0), 1)
-        let eased = raw < 0.5 ? 4 * raw * raw * raw : 1 - pow(-2 * raw + 2, 3) / 2
-        return tAtStart + (target - tAtStart) * eased
+        let raw = rawProgress(at: date)
+        let local = min(max(raw * (Self.transitionDuration + Self.staggerMax) / Self.transitionDuration, 0), 1)
+        return tAtStart + (target - tAtStart) * Self.cineEase(local)
+    }
+
+    /// Webの --ease-cine: cubic-bezier(0.22,1,0.36,1) 相当の強いease-out。
+    private static func cineEase(_ x: Double) -> Double {
+        1 - pow(1 - x, 3.4)
     }
 
     private func effectiveRotation(at date: Date) -> Double {
         var rotation = baseRotation + dragDelta
         if !isDragging {
             rotation += date.timeIntervalSince(spinEpoch) * Self.spinRate
+            // フリック: v0·τ·(1-e^(-t/τ)) — すーっと減速して自動スピンに溶ける
+            let dt = date.timeIntervalSince(flingEpoch)
+            rotation += flingVelocity * Self.flingTau * (1 - exp(-dt / Self.flingTau))
         }
         return rotation
     }
@@ -184,8 +221,9 @@ struct SpatialCanvasView: View {
                     dragPan = value.translation
                 } else {
                     if !isDragging {
-                        // スピン分をベースに焼き込んでからドラッグ追従に切り替える
+                        // スピン+モメンタム分をベースに焼き込んでからドラッグ追従へ
                         baseRotation = effectiveRotation(at: Date())
+                        flingVelocity = 0
                         isDragging = true
                     }
                     dragDelta = Double(value.translation.width / max(size.width, 1)) * .pi * 1.4
@@ -197,10 +235,11 @@ struct SpatialCanvasView: View {
                     panOffset.height += value.translation.height
                     dragPan = .zero
                 } else {
-                    // 慣性: 予測終端との差分を減衰させて足す
-                    let fling = Double((value.predictedEndTranslation.width - value.translation.width) / max(size.width, 1)) * .pi * 0.6
-                    baseRotation += dragDelta + fling
+                    baseRotation += dragDelta
                     dragDelta = 0
+                    // 指を離した瞬間の角速度をそのまま引き継ぐ
+                    flingVelocity = Double(value.velocity.width / max(size.width, 1)) * .pi * 1.4
+                    flingEpoch = Date()
                     spinEpoch = Date()
                     isDragging = false
                 }
@@ -220,13 +259,23 @@ struct SpatialCanvasView: View {
 
     // MARK: - helpers
 
+    private func prefetchPosters() {
+        let urls = store.videos.compactMap { video in
+            video.posterUrl.flatMap { MediaURL.url(mediaPath: $0) }
+        }
+        ThumbnailStore.shared.prefetch(urls)
+    }
+
     /// video.map のmin/maxを0..1に正規化(FLATレイアウトの元座標)。
-    private func flatNormalizedPositions() -> [String: CGPoint] {
+    private func rebuildFlatPositions() {
         var raw: [String: VaultPoint] = [:]
         for video in store.videos {
             if let point = video.map { raw[video.id] = point }
         }
-        guard !raw.isEmpty else { return [:] }
+        guard !raw.isEmpty else {
+            flatPositions = [:]
+            return
+        }
         let xs = raw.values.map(\.x)
         let ys = raw.values.map(\.y)
         let minX = xs.min()!, maxX = xs.max()!
@@ -240,7 +289,7 @@ struct SpatialCanvasView: View {
                 y: CGFloat((point.y - minY) / spanY)
             )
         }
-        return result
+        flatPositions = result
     }
 
     private static func lerp(_ a: CGFloat, _ b: CGFloat, _ t: Double) -> CGFloat {
