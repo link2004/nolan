@@ -24,22 +24,14 @@ struct VaultspaceView: View {
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    HStack(spacing: 16) {
-                        Button {
-                            store.send(.refresh)
-                        } label: {
-                            Image(systemName: "arrow.clockwise")
-                                .foregroundStyle(VSTheme.ink)
-                        }
-                        NavigationLink(state: AppReducer.Path.State.settings(SettingsFeature.State())) {
-                            Image(systemName: "gearshape")
-                                .foregroundStyle(VSTheme.ink)
-                        }
+                    NavigationLink(state: AppReducer.Path.State.settings(SettingsFeature.State())) {
+                        Image(systemName: "gearshape")
+                            .foregroundStyle(VSTheme.ink)
                     }
                 }
             }
-            .toolbarBackground(VSTheme.paper, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
+            // ヘッダーは塗りではなくグラデーションフェードで馴染ませる(下のoverlay参照)
+            .toolbarBackground(.hidden, for: .navigationBar)
             .sheet(item: $store.scope(state: \.detail, action: \.detail)) { detailStore in
                 VideoDetailView(store: detailStore)
             }
@@ -63,6 +55,8 @@ struct VaultspaceView: View {
         case .loaded:
             // 3D/FLATは統合キャンバスが1枚で描き、切替時はモーフィングで遷移する
             SpatialCanvasView(store: store)
+                .overlay(alignment: .top) { edgeFade(.top) }
+                .overlay(alignment: .bottom) { edgeFade(.bottom) }
                 .overlay(alignment: .topLeading) { zoomSourceAnchor }
                 .overlay(alignment: .bottomLeading) {
                     cornerLink("MAKE VIDEO", state: .storyboard(ProjectsFeature.State()))
@@ -71,6 +65,23 @@ struct VaultspaceView: View {
                     cornerLink("WIKI", state: .wiki(WikiFeature.State()))
                 }
         }
+    }
+
+    /// 画面上下の紙色グラデーションフェード。カードが端でヘッダー/四隅の文字と
+    /// 重なっても読めるよう、端に向かって紙に溶ける。
+    private func edgeFade(_ edge: VerticalAlignment) -> some View {
+        LinearGradient(
+            stops: [
+                .init(color: VSTheme.paper, location: 0),
+                .init(color: VSTheme.paper.opacity(0.85), location: 0.4),
+                .init(color: VSTheme.paper.opacity(0), location: 1),
+            ],
+            startPoint: edge == .top ? .top : .bottom,
+            endPoint: edge == .top ? .bottom : .top
+        )
+        .frame(height: 130)
+        .ignoresSafeArea(edges: edge == .top ? .top : .bottom)
+        .allowsHitTesting(false)
     }
 
     /// タップした写真の矩形に透明なアンカーを重ね、ズームトランジションの発火元にする。
