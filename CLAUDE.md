@@ -1,45 +1,48 @@
-# CueCam
+# CueCam — Ten-K Vault 読み取り専用iOSクライアント
 
-AIが「どんな場面を撮影すればいいか」を指示し、ユーザーがその指示に従って動画を撮影できるカメラアプリ。映画監督の「キュー!」をAIが出す、が名前の由来。
+Mac上のTen-K Vault(Obsidianボルト + Aftertasteパイプライン)を、iPhoneから閲覧するためのネイティブSwiftUIアプリ。Wiki / Storyboard Studio / Vaultspace の3サーフェス + 設定の4タブ構成。**閲覧のみで、Vault側への書き込みは一切行わない**(ADR-002参照)。
 
-## コアフロー
-
-1. ホームでテーマを入力（例: 「カフェの紹介動画」）
-2. AIディレクターがテーマからショットリスト（撮影指示のリスト）を生成
-3. 撮影画面で1カットずつ指示を表示し、ユーザーが指示に従って録画
-4. 全カット撮り終えたら完了
+旧「AIディレクターカメラ」からのピボット。旧コードはベースラインcommit `c6ddaf5` に保存済み。
 
 ## アーキテクチャ
 
-TCA (The Composable Architecture) ベースの3層構造（ADR-001参照）。
+TCA (ComposableArchitecture 1.17) ベース。Swift 6 strict concurrency / iOS 18.0+。
 
 ```
 CueCam/
-├── App/          # AppReducer（ルート）+ AppView
-├── Features/     # HomeFeature, ShootFeature
-├── Clients/      # DirectorClient（AI撮影指示生成）
-├── Models/       # ShotInstruction
+├── App/          # AppReducer(TabViewルート: wiki/storyboard/vaultspace/settings) + AppView
+├── Features/     # WikiFeature, ProjectsFeature(Storyboard), VaultspaceFeature, SettingsFeature
+├── Clients/      # WikiClient, StoryboardClient, VaultspaceClient, ServerConfigClient(@DependencyClient)
+├── Models/       # ServerConfig(VaultSurface/LoadState), WikiModels, StoryboardModels, VaultspaceModels
+├── Networking/   # HTTP(getJSON/baseURL), MediaURL(メディアキーのURL組み立て)
 └── Design/       # AppColor
 ```
 
-- プロジェクトファイルは XcodeGen 管理。`project.yml` を編集して `xcodegen generate` で再生成する（`.xcodeproj` はgit管理外）
-- Bundle ID: `com.cuecam.app` / iOS 18.0+ / Team: 7LF5Z5CUCR
+- 全モデルは `Sendable`。UI可変状態は `@MainActor` に隔離
+- CueCamApp.init() で `URLCache.shared` を 20MB/100MB に拡張(LANメディアのキャッシュ用)
+- メディアURL: サーバーがR2へ302リダイレクトすることがある(URLSession/AVPlayerは自動追従)
+
+## バックエンド接続(Mac上のローカルサーバー3系統)
+
+| サーフェス | サーバー | ポート |
+|---|---|---|
+| Wiki | Quartz (静的サイト) | :8750 |
+| Storyboard | `serve_storyboard.py` | :8731 |
+| Vaultspace | `serve_vaultspace.py` | :8765 |
+
+- ベースURLは `ServerConfigClient` が保持し、設定タブで変更・到達性プローブが可能
+- **読み取り専用。backend(ten-k-vault側)のコード変更は禁止** — このアプリはサーバーの既存APIに合わせる
+- Info.plist: `NSAllowsLocalNetworking` + `NSLocalNetworkUsageDescription` でLAN接続を許可
 
 ## 実装状況
 
-- [x] プロジェクトスキャフォールド（TCA + XcodeGen）
-- [x] HomeFeature: テーマ入力 → 撮影開始
-- [x] ShootFeature: ショットリスト表示・カット送り（録画はUI状態のみ）
-- [ ] CameraClient: AVFoundationでの実録画・プレビュー表示（`// TODO:` 参照）
-- [ ] DirectorClient: Claude APIによる動的ショットリスト生成（現状は固定モック。`// TODO:` 参照）
-- [ ] 音声読み上げによる指示（AVSpeechSynthesizer等）
-- [ ] 撮影済みカットの確認・書き出し
-
-## 一時実装・TODO
-
-- `DirectorClient.liveValue` は固定モックのショットリストを返す仮実装
-- `ShootFeature.recordButtonTapped` は `isRecording` フラグを切り替えるだけで実録画しない
-- `ShootView` のカメラプレビューは黒背景のプレースホルダー
+- [x] Phase 0: ピボット土台(旧Home/Shoot削除、TabViewルート、ATS/ローカルネットワーク設定)
+- [x] Phase 1: Models + MediaURL + 3クライアント + SettingsFeature(プローブ)
+- [x] Phase 2: Wiki(エクスプローラ/ノート/検索/バックリンク)
+- [x] Phase 3: Storyboard(プロジェクト一覧 + ボード + クリップ再生)
+- [x] Phase 4: Vaultspace(マップキャンバス + 詳細シート)
+- [ ] ビルド確認(実機/シミュレータでの動作検証は未)
+- [ ] Phase 5: 検索・リフレッシュ・エラー状態の仕上げ
 
 ## 開発コマンド
 
@@ -47,5 +50,13 @@ CueCam/
 xcodegen generate   # project.yml から .xcodeproj を再生成
 xcodebuild -project CueCam.xcodeproj -scheme CueCam \
   -destination 'generic/platform=iOS Simulator' \
-  -skipMacroValidation build   # ビルド確認（TCAのマクロ承認をCLIでスキップするため必須）
+  -skipMacroValidation build   # ビルド確認(TCAのマクロ承認をCLIでスキップするため必須)
 ```
+
+- プロジェクトファイルは XcodeGen 管理。`project.yml` が唯一のソース(`.xcodeproj` はgit管理外)
+- Bundle ID: `com.cuecam.app` / iOS 18.0+ / Team: 7LF5Z5CUCR
+
+## 設計決定
+
+- ADR-001: TCA + XcodeGen によるプロジェクト構成(`docs/decisions/001-tca-xcodegen.md`)
+- ADR-002: Ten-K Vault 読み取り専用クライアントへのピボット(`docs/decisions/ADR-002-ten-k-vault-client-pivot.md`)

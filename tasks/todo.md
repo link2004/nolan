@@ -1,21 +1,15 @@
 # CueCam タスク
 
-## プロジェクト立ち上げ (2026-07-05)
+## Ten-K Vault クライアントへのピボット (2026-07-05)
 
-- [x] XcodeGen + TCA でプロジェクトスキャフォールド作成
-- [x] HomeFeature（テーマ入力）
-- [x] ShootFeature（撮影指示の表示・カット送り）
-- [x] DirectorClient（モック実装）
-- [x] ビルド確認
-- [x] git init
+計画: `~/.claude/plans/crispy-watching-elephant.md`。旧AIディレクターカメラのタスクは廃止(コードはベースラインcommit c6ddaf5 に保存)。
 
-## 次にやること
-
-- [ ] CameraClient: AVCaptureSession でプレビュー + 録画（実機必須）
-- [ ] DirectorClient: Claude API で動的ショットリスト生成（APIキー管理は secret-via-pbpaste 参照）
-- [ ] 撮影指示の音声読み上げ
-- [ ] 撮影済みカットのレビュー画面・フォトライブラリ保存
-
-## レビュー
-
-立ち上げ完了。録画とAI生成はスタブ（CLAUDE.md「一時実装・TODO」参照）で、UIフロー（テーマ入力 → 指示表示 → カット送り → 完了）はシミュレータで動作する状態。
+- [x] Phase 0: ベースラインcommit → Home/Shoot/Director削除 → TabViewルート → project.yml (ATS/local network)
+- [x] Phase 1: Models + MediaURL + 3クライアント + SettingsFeature(プローブ)
+- [x] Phase 2: Wiki(WikiClient actor + エクスプローラ/ノート/検索/バックリンク)
+- [x] Phase 3a: Storyboard(プロジェクト一覧 + ボード、静止画のみ)
+- [x] Phase 3b: InlineClipPlayer + PlayerPool + フルスクリーン再生
+- [x] Phase 4: Vaultspace(マップキャンバス + 詳細シート)
+- [ ] ビルド確認(xcodegen + xcodebuild は後段のビルドエージェントが実行)
+- [ ] Phase 5: 検索・リフレッシュ・エラー状態の仕上げ
+- [x] ドキュメント: CLAUDE.md書き換え + ADR-002

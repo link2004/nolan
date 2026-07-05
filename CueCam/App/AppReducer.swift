@@ -2,40 +2,43 @@ import ComposableArchitecture
 
 @Reducer
 struct AppReducer {
-    @ObservableState
-    struct State: Equatable {
-        var home = HomeFeature.State()
-        @Presents var shoot: ShootFeature.State?
+    enum Tab: String, CaseIterable {
+        case wiki
+        case storyboard
+        case vaultspace
+        case settings
     }
 
-    enum Action {
-        case home(HomeFeature.Action)
-        case shoot(PresentationAction<ShootFeature.Action>)
+    @ObservableState
+    struct State: Equatable {
+        var wiki = WikiFeature.State()
+        var storyboard = ProjectsFeature.State()
+        var vaultspace = VaultspaceFeature.State()
+        var settings = SettingsFeature.State()
+        var tab: Tab = .wiki
+    }
+
+    enum Action: BindableAction {
+        case binding(BindingAction<State>)
+        case wiki(WikiFeature.Action)
+        case storyboard(ProjectsFeature.Action)
+        case vaultspace(VaultspaceFeature.Action)
+        case settings(SettingsFeature.Action)
     }
 
     var body: some ReducerOf<Self> {
-        Scope(state: \.home, action: \.home) {
-            HomeFeature()
+        BindingReducer()
+        Scope(state: \.wiki, action: \.wiki) {
+            WikiFeature()
         }
-        Reduce { state, action in
-            switch action {
-            case .home(.delegate(.startShooting(let theme))):
-                state.shoot = ShootFeature.State(theme: theme)
-                return .none
-
-            case .home:
-                return .none
-
-            case .shoot(.presented(.delegate(.finished))):
-                state.shoot = nil
-                return .none
-
-            case .shoot:
-                return .none
-            }
+        Scope(state: \.storyboard, action: \.storyboard) {
+            ProjectsFeature()
         }
-        .ifLet(\.$shoot, action: \.shoot) {
-            ShootFeature()
+        Scope(state: \.vaultspace, action: \.vaultspace) {
+            VaultspaceFeature()
+        }
+        Scope(state: \.settings, action: \.settings) {
+            SettingsFeature()
         }
     }
 }
