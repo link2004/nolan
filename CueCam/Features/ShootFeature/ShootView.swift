@@ -4,43 +4,45 @@ import ComposableArchitecture
 import SwiftUI
 import UIKit
 
-/// 横持ち前提の撮影画面。全面プレビュー + 下部スクリプトバー + 右端録画ボタン
+/// 横持ちの撮影画面(ダークシネマ = SBTheme)。
+/// カメラは16:9のステージにレターボックス表示し、UIはステージ外の余白に置いて映像と重ねない
 struct ShootView: View {
     @Bindable var store: StoreOf<ShootFeature>
     @Environment(\.openURL) private var openURL
+    @Namespace private var pipNamespace
+    @State private var pipExpanded = false
+
+    private static let recordRed = Color.rgb(0xd6453c)
+    private static let barHeight: CGFloat = 76
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
-
-            if let session = store.session {
-                CameraPreviewView(session: session)
-                    .ignoresSafeArea()
-            }
+            SBTheme.bg.ignoresSafeArea()
 
             switch store.phase {
             case .preparing:
                 ProgressView()
-                    .tint(.white)
+                    .tint(SBTheme.fg2)
 
             case .denied:
                 deniedView
 
             case .ready, .recording:
-                shootingOverlay
+                shootingLayout
 
             case .reviewing(let url):
-                reviewOverlay(url: url)
+                reviewLayout(url: url)
 
             case .finished:
                 finishedView
             }
 
-            if store.showsClose, store.phase != .recording {
-                closeButton
+            if pipExpanded, let reference = store.currentScript?.reference {
+                expandedReference(reference)
             }
         }
         .statusBarHidden()
+        .persistentSystemOverlays(.hidden)
         .onAppear {
             OrientationLock.lock(.landscape)
             store.send(.onAppear)
@@ -48,119 +50,132 @@ struct ShootView: View {
         .onDisappear {
             OrientationLock.lock(.portrait)
         }
-    }
-
-    private var closeButton: some View {
-        VStack {
-            HStack {
-                Button {
-                    store.send(.closeButtonTapped)
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 36, height: 36)
-                        .background(.black.opacity(0.5), in: Circle())
-                }
-                .buttonStyle(.plain)
-                Spacer()
-            }
-            Spacer()
+        .onChange(of: store.currentScript?.id) {
+            pipExpanded = false
         }
-        .padding(16)
     }
 
-    // MARK: - 撮影中オーバーレイ
+    // MARK: - 撮影レイアウト
 
-    private var shootingOverlay: some View {
-        ZStack {
-            if store.session == nil {
-                Text("Camera unavailable (run on a physical device)")
-                    .font(.callout)
-                    .foregroundStyle(.white.opacity(0.6))
+    private var shootingLayout: some View {
+        VStack(spacing: 0) {
+            ZStack {
+                cameraStage
+                stageRails
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay(alignment: .top) {
+                if let saveError = store.saveError {
+                    saveErrorBanner(saveError)
+                        .padding(.top, 10)
+                }
+            }
+            scriptBar
+        }
+    }
 
+    /// 16:9でレターボックスされたカメラ映像 + フレーミングガイド
+    private var cameraStage: some View {
+        Group {
+            if let session = store.session {
+                CameraPreviewView(session: session)
+            } else {
+                ZStack {
+                    SBTheme.bgRaised
+                    Text("CAMERA UNAVAILABLE — RUN ON DEVICE")
+                        .font(.system(size: 10, design: .monospaced))
+                        .tracking(1.6)
+                        .foregroundStyle(SBTheme.fg3)
+                }
+            }
+        }
+        .aspectRatio(16 / 9, contentMode: .fit)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay {
+            FramingGuideOverlay(
+                motion: store.currentScript.flatMap(MotionCoach.detect)
+            )
+            .id(store.currentScript?.id)
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(SBTheme.hairline, lineWidth: 1)
+        }
+        .overlay(alignment: .top) {
+            if store.phase == .recording {
+                recIndicator
+                    .padding(.top, 10)
+            }
+        }
+        .padding(.vertical, 10)
+    }
+
+    /// ステージ左右の余白に置くコントロール(映像と重ねない)
+    private var stageRails: some View {
+        HStack {
+            // 左レール: 閉じる
             VStack {
-                if store.phase == .recording {
-                    recIndicator
-                        .padding(.top, 12)
+                if store.showsClose, store.phase != .recording {
+                    closeButton
                 }
                 Spacer()
-                scriptBar
             }
 
-            HStack {
+            Spacer()
+
+            // 右レール: 参照PiP(上) + 録画ボタン(REFの下の残り空間の中央 — 重ならない)
+            VStack(spacing: 0) {
+                if let reference = store.currentScript?.reference, !pipExpanded {
+                    referenceThumb(reference)
+                }
                 Spacer()
                 recordButton
+                Spacer()
             }
-            .padding(.trailing, 28)
+            .frame(width: 104)
         }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 12)
     }
 
     private var recIndicator: some View {
         HStack(spacing: 6) {
-            Circle()
-                .fill(AppColor.record)
-                .frame(width: 10, height: 10)
+            PulsingDot(color: Self.recordRed)
             Text("REC")
-                .font(.caption.bold())
-                .foregroundStyle(.white)
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .tracking(2)
+                .foregroundStyle(SBTheme.fg1)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 5)
-        .background(.black.opacity(0.5), in: Capsule())
+        .background(.black.opacity(0.45), in: Capsule())
     }
 
-    private var scriptBar: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 10) {
-                Text("\(store.currentIndex + 1)/\(store.scripts.count)")
-                    .font(.footnote.bold().monospacedDigit())
-                    .foregroundStyle(.black)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(AppColor.accent, in: Capsule())
+    private func saveErrorBanner(_ message: String) -> some View {
+        Text("CAMERA ROLL SAVE FAILED — \(message)")
+            .font(.system(size: 9, weight: .semibold, design: .monospaced))
+            .tracking(1)
+            .lineLimit(1)
+            .foregroundStyle(SBTheme.fg1)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(SBTheme.crimson.opacity(0.9), in: Capsule())
+    }
 
-                if let slate = store.currentScript?.slate {
-                    Text(slate)
-                        .font(.system(size: 11, design: .monospaced))
-                        .tracking(1)
-                        .foregroundStyle(.white.opacity(0.6))
+    private var closeButton: some View {
+        Button {
+            store.send(.closeButtonTapped)
+        } label: {
+            Image(systemName: "xmark")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(SBTheme.fg2)
+                .frame(width: 34, height: 34)
+                .background(.black.opacity(0.35), in: Circle())
+                .overlay {
+                    Circle().strokeBorder(SBTheme.hairlineStrong, lineWidth: 1)
                 }
-
-                ForEach(store.currentScript?.techniques ?? [], id: \.self) { technique in
-                    ShootTechniqueChip(text: technique)
-                }
-
-                Spacer(minLength: 0)
-
-                if !store.title.isEmpty {
-                    Text(store.title)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.45))
-                        .lineLimit(1)
-                }
-            }
-
-            Text(store.currentScript?.text ?? "")
-                .font(.body.weight(.medium))
-                .foregroundStyle(.white)
-                .lineLimit(2)
-                .minimumScaleFactor(0.8)
-
-            if let direction = store.currentScript?.direction {
-                Text(direction)
-                    .font(.footnote)
-                    .foregroundStyle(.white.opacity(0.75))
-                    .lineLimit(2)
-            }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 14))
-        .padding(.horizontal, 16)
-        .padding(.bottom, 12)
+        .buttonStyle(PressableButtonStyle())
     }
 
     private var recordButton: some View {
@@ -169,50 +184,186 @@ struct ShootView: View {
         } label: {
             ZStack {
                 Circle()
-                    .stroke(.white, lineWidth: 4)
-                    .frame(width: 68, height: 68)
+                    .strokeBorder(SBTheme.fg1.opacity(0.75), lineWidth: 2.5)
+                    .frame(width: 64, height: 64)
                 if store.phase == .recording {
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(AppColor.record)
-                        .frame(width: 28, height: 28)
+                    RoundedRectangle(cornerRadius: 5)
+                        .fill(Self.recordRed)
+                        .frame(width: 24, height: 24)
                 } else {
                     Circle()
-                        .fill(AppColor.record)
-                        .frame(width: 56, height: 56)
+                        .fill(Self.recordRed)
+                        .frame(width: 50, height: 50)
                 }
             }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressableButtonStyle())
+        .animation(.spring(response: 0.28, dampingFraction: 0.8), value: store.phase)
     }
 
-    // MARK: - テイク確認オーバーレイ
+    // MARK: - 下部スクリプトバー
 
-    private func reviewOverlay(url: URL) -> some View {
+    private var scriptBar: some View {
+        HStack(spacing: 16) {
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
+                Text(String(format: "%02d", store.currentIndex + 1))
+                    .font(.instrumentSerif(30))
+                    .foregroundStyle(SBTheme.fg1)
+                Text("/ \(String(format: "%02d", store.scripts.count))")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(SBTheme.fg3)
+            }
+
+            Rectangle()
+                .fill(SBTheme.hairline)
+                .frame(width: 1, height: 40)
+
+            VStack(alignment: .leading, spacing: 3) {
+                if store.currentScript?.slate != nil || store.currentScript?.techniques.isEmpty == false {
+                    HStack(spacing: 8) {
+                        if let slate = store.currentScript?.slate {
+                            Text(slate)
+                                .font(.system(size: 10, design: .monospaced))
+                                .tracking(1.4)
+                                .foregroundStyle(SBTheme.fg3)
+                        }
+                        ForEach(store.currentScript?.techniques ?? [], id: \.self) { technique in
+                            ShootTechniqueChip(text: technique)
+                        }
+                    }
+                }
+                Text(store.currentScript?.text ?? "")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundStyle(SBTheme.fg1)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+                if let direction = store.currentScript?.direction {
+                    Text(direction)
+                        .font(.system(size: 11))
+                        .foregroundStyle(SBTheme.fg2)
+                        .lineLimit(1)
+                }
+            }
+
+            Spacer(minLength: 12)
+
+            if !store.title.isEmpty {
+                Text(store.title)
+                    .font(.instrumentSerifItalic(14))
+                    .foregroundStyle(SBTheme.fg3)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.horizontal, 20)
+        .frame(maxWidth: .infinity)
+        .frame(height: Self.barHeight)
+        .background(SBTheme.bg)
+        .overlay(alignment: .top) {
+            Rectangle().fill(SBTheme.hairline).frame(height: 1)
+        }
+    }
+
+    // MARK: - 参照メディア(お手本)
+
+    private func referenceThumb(_ reference: ShotReference) -> some View {
+        Button {
+            withAnimation(.spring(response: 0.38, dampingFraction: 0.85)) {
+                pipExpanded = true
+            }
+        } label: {
+            ReferenceMediaView(reference: reference, isMuted: true)
+                .frame(width: 92, height: 115)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(SBTheme.hairlineStrong, lineWidth: 1)
+                }
+                .overlay(alignment: .bottomLeading) {
+                    Text("REF")
+                        .font(.system(size: 8, weight: .bold, design: .monospaced))
+                        .tracking(1.5)
+                        .foregroundStyle(SBTheme.fg1.opacity(0.9))
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(.black.opacity(0.55), in: Capsule())
+                        .padding(4)
+                }
+                .shadow(color: .black.opacity(0.5), radius: 6, y: 2)
+        }
+        .buttonStyle(PressableButtonStyle())
+        .matchedGeometryEffect(id: "reference-pip", in: pipNamespace)
+        .id(store.currentScript?.id)
+    }
+
+    /// タップで拡大した参照メディア。もう一度タップで閉じる
+    private func expandedReference(_ reference: ShotReference) -> some View {
         ZStack {
-            LoopingPlayerView(url: url)
+            SBTheme.bg.opacity(0.92)
                 .ignoresSafeArea()
 
-            VStack {
-                Spacer()
-                HStack(spacing: 12) {
+            VStack(spacing: 10) {
+                ReferenceMediaView(
+                    reference: reference,
+                    isMuted: store.phase == .recording,
+                    gravity: .resizeAspect
+                )
+                .matchedGeometryEffect(id: "reference-pip", in: pipNamespace)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.horizontal, 40)
+                .padding(.top, 20)
+
+                Text("REFERENCE — TAP TO CLOSE")
+                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .tracking(2)
+                    .foregroundStyle(SBTheme.fg3)
+                    .padding(.bottom, 16)
+            }
+            .allowsHitTesting(false)
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            withAnimation(.spring(response: 0.38, dampingFraction: 0.85)) {
+                pipExpanded = false
+            }
+        }
+    }
+
+    // MARK: - テイク確認(カメラは消してプレビューに集中)
+
+    private func reviewLayout(url: URL) -> some View {
+        VStack(spacing: 0) {
+            LoopingPlayerView(url: url, gravity: .resizeAspect)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.vertical, 10)
+
+            HStack(spacing: 16) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("TAKE\(store.currentScript?.slate.map { " — \($0)" } ?? "")")
+                        .font(.system(size: 10, design: .monospaced))
+                        .tracking(1.8)
+                        .foregroundStyle(SBTheme.fg3)
                     Text(store.currentScript?.text ?? "")
-                        .font(.callout)
-                        .foregroundStyle(.white)
-                        .lineLimit(2)
-                        .minimumScaleFactor(0.8)
-                    Spacer()
-                    Button("Retake") { store.send(.retakeTapped) }
-                        .buttonStyle(.bordered)
-                        .tint(.white)
-                    Button("OK, Next") { store.send(.okTapped) }
-                        .buttonStyle(.borderedProminent)
-                        .tint(AppColor.accent)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(SBTheme.fg1)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 14))
-                .padding(.horizontal, 16)
-                .padding(.bottom, 12)
+
+                Spacer(minLength: 12)
+
+                CineButton("RETAKE", style: .ghost) {
+                    store.send(.retakeTapped)
+                }
+                CineButton("USE TAKE", style: .primary) {
+                    store.send(.okTapped)
+                }
+            }
+            .padding(.horizontal, 20)
+            .frame(maxWidth: .infinity)
+            .frame(height: Self.barHeight)
+            .background(SBTheme.bg)
+            .overlay(alignment: .top) {
+                Rectangle().fill(SBTheme.hairline).frame(height: 1)
             }
         }
     }
@@ -220,40 +371,134 @@ struct ShootView: View {
     // MARK: - 完了 / 権限拒否
 
     private var finishedView: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 48))
-                .foregroundStyle(AppColor.accent)
-            Text("All \(store.scripts.count) shots complete!")
-                .font(.title3.bold())
-                .foregroundStyle(.white)
+        VStack(spacing: 20) {
+            Text("That's a wrap.")
+                .font(.instrumentSerif(38))
+                .foregroundStyle(SBTheme.fg1)
+            Text("\(store.approvedTakes.count) TAKES — SAVED TO CAMERA ROLL")
+                .font(.system(size: 10, design: .monospaced))
+                .tracking(2)
+                .foregroundStyle(SBTheme.fg3)
             HStack(spacing: 12) {
-                Button("Start Over") { store.send(.restartTapped) }
-                    .buttonStyle(.bordered)
-                    .tint(.white)
+                CineButton("START OVER", style: .ghost) {
+                    store.send(.restartTapped)
+                }
                 if store.showsClose {
-                    Button("Done") { store.send(.closeButtonTapped) }
-                        .buttonStyle(.borderedProminent)
-                        .tint(AppColor.accent)
+                    CineButton("DONE", style: .primary) {
+                        store.send(.closeButtonTapped)
+                    }
                 }
             }
+            .padding(.top, 6)
         }
     }
 
     private var deniedView: some View {
         VStack(spacing: 16) {
-            Image(systemName: "video.slash.fill")
-                .font(.largeTitle)
-                .foregroundStyle(.white.opacity(0.7))
+            Image(systemName: "video.slash")
+                .font(.system(size: 30, weight: .light))
+                .foregroundStyle(SBTheme.fg3)
             Text("Camera and microphone access is required to shoot")
-                .foregroundStyle(.white)
-            Button("Open Settings") {
+                .font(.system(size: 14))
+                .foregroundStyle(SBTheme.fg2)
+            CineButton("OPEN SETTINGS", style: .primary) {
                 if let url = URL(string: UIApplication.openSettingsURLString) {
                     openURL(url)
                 }
             }
-            .buttonStyle(.borderedProminent)
-            .tint(AppColor.accent)
+            .padding(.top, 4)
+        }
+    }
+}
+
+// MARK: - 共有コンポーネント
+
+/// ダークシネマ調のボタン。primary = 温白フィル、ghost = ヘアライン枠
+struct CineButton: View {
+    enum Style {
+        case primary, ghost
+    }
+
+    let label: String
+    let style: Style
+    let action: () -> Void
+
+    init(_ label: String, style: Style, action: @escaping () -> Void) {
+        self.label = label
+        self.style = style
+        self.action = action
+    }
+
+    var body: some View {
+        Button(action: action) {
+            Text(label)
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .tracking(1.8)
+                .foregroundStyle(style == .primary ? SBTheme.bg : SBTheme.fg2)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 10)
+                .background {
+                    if style == .primary {
+                        Capsule().fill(SBTheme.fg1)
+                    }
+                }
+                .overlay {
+                    if style == .ghost {
+                        Capsule().strokeBorder(SBTheme.hairlineStrong, lineWidth: 1)
+                    }
+                }
+        }
+        .buttonStyle(PressableButtonStyle())
+    }
+}
+
+/// 押下で軽く沈むフィードバック
+struct PressableButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.92 : 1)
+            .opacity(configuration.isPressed ? 0.85 : 1)
+            .animation(.spring(response: 0.25, dampingFraction: 0.7), value: configuration.isPressed)
+    }
+}
+
+/// RECの点滅ドット
+struct PulsingDot: View {
+    let color: Color
+    @State private var dimmed = false
+
+    var body: some View {
+        Circle()
+            .fill(color)
+            .frame(width: 8, height: 8)
+            .opacity(dimmed ? 0.25 : 1)
+            .onAppear {
+                withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
+                    dimmed = true
+                }
+            }
+    }
+}
+
+/// 参照メディアの中身(クリップ=ループ再生 / 静止画)。サイズ・装飾は呼び出し側で付ける
+struct ReferenceMediaView: View {
+    let reference: ShotReference
+    var isMuted = true
+    var gravity: AVLayerVideoGravity = .resizeAspectFill
+
+    var body: some View {
+        Group {
+            if reference.isClip {
+                LoopingPlayerView(url: reference.url, isMuted: isMuted, gravity: gravity)
+            } else {
+                AsyncImage(url: reference.url) { image in
+                    image
+                        .resizable()
+                        .aspectRatio(contentMode: gravity == .resizeAspect ? .fit : .fill)
+                } placeholder: {
+                    Rectangle().fill(SBTheme.bgRaised)
+                }
+            }
         }
     }
 }
@@ -265,30 +510,34 @@ struct ShootTechniqueChip: View {
 
     var body: some View {
         Text(text)
-            .font(.system(size: 10))
+            .font(.system(size: 9))
             .tracking(1)
             .textCase(.uppercase)
-            .foregroundStyle(.white.opacity(0.7))
-            .padding(.horizontal, 9)
-            .padding(.vertical, 4)
+            .foregroundStyle(SBTheme.fg2)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
             .overlay {
-                Capsule().strokeBorder(.white.opacity(0.25), lineWidth: 1)
+                Capsule().strokeBorder(SBTheme.hairline, lineWidth: 1)
             }
     }
 }
 
-/// コントロール無しでテイクをループ再生するプレイヤー
+/// コントロール無しでループ再生するプレイヤー(テイク確認・参照PiPで共用)
 private struct LoopingPlayerView: UIViewRepresentable {
     let url: URL
+    var isMuted = false
+    var gravity: AVLayerVideoGravity = .resizeAspect
 
     func makeUIView(context: Context) -> PlayerUIView {
         let view = PlayerUIView()
-        context.coordinator.configure(view: view, url: url)
+        view.playerLayer.videoGravity = gravity
+        context.coordinator.configure(view: view, url: url, isMuted: isMuted)
         return view
     }
 
     func updateUIView(_ uiView: PlayerUIView, context: Context) {
-        context.coordinator.configure(view: uiView, url: url)
+        uiView.playerLayer.videoGravity = gravity
+        context.coordinator.configure(view: uiView, url: url, isMuted: isMuted)
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -299,15 +548,17 @@ private struct LoopingPlayerView: UIViewRepresentable {
         private var looper: AVPlayerLooper?
         private var currentURL: URL?
 
-        func configure(view: PlayerUIView, url: URL) {
-            guard url != currentURL else { return }
-            currentURL = url
-            let item = AVPlayerItem(url: url)
-            let player = AVQueuePlayer(items: [item])
-            looper = AVPlayerLooper(player: player, templateItem: item)
-            self.player = player
-            view.playerLayer.player = player
-            player.play()
+        func configure(view: PlayerUIView, url: URL, isMuted: Bool) {
+            if url != currentURL {
+                currentURL = url
+                let item = AVPlayerItem(url: url)
+                let player = AVQueuePlayer(items: [item])
+                looper = AVPlayerLooper(player: player, templateItem: item)
+                self.player = player
+                view.playerLayer.player = player
+                player.play()
+            }
+            player?.isMuted = isMuted
         }
     }
 
