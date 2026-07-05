@@ -51,8 +51,8 @@ struct SpatialCanvasView: View {
     private static let cylinderSpreadX: CGFloat = 0.46
     private static let cylinderScaleFactor: CGFloat = 0.8
     /// FLATの世界の広がり(画面比)。タイルを小さく+広がりを増やして重なりを減らす
-    private static let flatSpreadX: CGFloat = 2.6
-    private static let flatSpreadY: CGFloat = 2.0
+    private static let flatSpreadX: CGFloat = 3.4
+    private static let flatSpreadY: CGFloat = 2.6
 
     /// タイルの既定サイズ(zoom=1)。群全体に対して控えめにして重なりを抑える。
     private static func tileBaseSize(for id: String) -> (width: CGFloat, height: CGFloat) {
@@ -457,7 +457,7 @@ struct SpatialCanvasView: View {
         // 代表的な画面サイズでのワールド寸法(比率が合っていれば十分)
         let worldW: CGFloat = 393 * Self.flatSpreadX
         let worldH: CGFloat = 760 * Self.flatSpreadY
-        let gap: CGFloat = 10  // タイル間に最低確保する余白
+        let gap: CGFloat = 24  // タイル間に最低確保する余白(密集を防ぎ呼吸を持たせる)
 
         struct Body {
             let id: String
